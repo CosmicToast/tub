@@ -159,17 +159,6 @@ pub const Input = union(enum(u16)) {
     }
 };
 
-/// Reads a key from standard input, waiting for a key if boot_services is set
-/// or returning an error if the key is otherwise not ready.
-/// The return value is a tagged union capable of representing some keys or a
-/// unicode codepoint.
-pub fn readKey(self: *Self, boot_services: ?*BootServices) !Input {
-    if (boot_services) |bs| {
-        _ = try bs.waitForEvent(&.{self.input.wait_for_key});
-    }
-    return self.readInput();
-}
-
 pub fn waitForKey(self: *Self, event: ?uefi.Event) !bool {
     const bs = globals.boot_services;
     var events = [2]uefi.Event{self.input.wait_for_key, self.input.wait_for_key};
@@ -184,47 +173,6 @@ pub fn waitForKey(self: *Self, event: ?uefi.Event) !bool {
 
 pub inline fn readInput(self: *Self) !Input {
     return Input.fromInput(try self.input.readKeyStroke());
-}
-
-fn picker(comptime T: type) type {
-    return union(enum) {
-        selection: T,
-        editor: T,
-        // actions
-        escape,
-    };
-}
-
-pub fn pick(self: *Self, comptime T: type, slice: []const T) !picker(T) { std.debug.assert(slice.len > 0 and slice.len <= 27);
-
-    for (slice, 0..) |e, i| {
-        const idx: u21 = @truncate('a' + i);
-        try self.writer.print("{u}: {f}\r\n", .{idx, e});
-    }
-
-    while (true) {
-        _ = try self.waitForKey(null);
-        const key = try self.readInput();
-        handler: switch (key) {
-            .text => |c| switch (c) {
-                'a'...'z' => {
-                    const idx = c - 'a';
-                    if (idx >= slice.len) return error.OutOfRange;
-                    return .{ .selection = slice[idx] };
-                },
-                'A'...'Z' => {
-                    const idx = c - 'A';
-                    if (idx >= slice.len) return error.OutOfRange;
-                    return .{ .editor = slice[idx] };
-                },
-                '\r' => continue :handler .{ .text = 'a' },
-                else => continue,
-            },
-            .escape, .left_arrow => return .escape,
-            .right_arrow => return .{ .selection = slice[0] },
-            else => continue,
-        }
-    }
 }
 
 /// Initializes a console manager from the uefi system table.

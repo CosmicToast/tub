@@ -17,22 +17,6 @@ const SplitIterator = mem.SplitIterator(u8, .scalar);
 
 const Config = @This();
 
-inline fn contains(str: []const u8, char: u8) bool {
-    return mem.containsAtLeastScalar(u8, str, char, 1);
-}
-
-inline fn findLast(str: []const u8, char: u8) ?usize {
-    return mem.findScalarLast(u8, str, char);
-}
-
-inline fn split(str: []const u8, sep: u8) SplitIterator {
-    return mem.splitScalar(u8, str, sep);
-}
-
-inline fn replace(str: []u8, char: u8, by: u8) void {
-    return mem.replaceScalar(u8, str, char, by);
-}
-
 /// How long to wait with no input to boot the default boot option.
 /// Set with !t[imeout] number.
 timeout: u8 = 5,
@@ -159,7 +143,7 @@ const BootLine = struct {
     cmdline: []const u8,
 
     pub fn create(line: []u8) ?BootLine {
-        var it = split(line, ':');
+        var it = mem.splitScalar(u8, line, ':');
         const sort    = text.Sorter.init(it.first());
         const pattern = it.next() orelse return null;
         const group   = it.next() orelse return null;
@@ -267,7 +251,7 @@ pub const Group = struct {
         out.line   = line;
 
         // if there's no globbing pattern, we trust the hardcoded string
-        if (!contains(line.pattern, '*')) {
+        if (!mem.containsAtLeastScalar(u8, line.pattern, '*', 1)) {
             out.items = try gpa.alloc(Option, 1);
             out.items[0] = .{.parent = out, .path = line.pattern};
             return;
