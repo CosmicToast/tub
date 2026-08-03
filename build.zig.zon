@@ -1,0 +1,12 @@
+.{
+    .name = .tub,
+    .version = "0.1.0-beta.1",
+    .minimum_zig_version = "0.17.0-dev.1543+6db520a4c",
+    .paths = .{
+        "build.zig.zon",
+        "build.zig",
+        "docs",
+        "src",
+    },
+    .fingerprint = 0x5d4d94592761b9be,
+}
