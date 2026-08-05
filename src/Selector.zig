@@ -21,14 +21,10 @@ const SelectorError = error {
 cfg: *const Config,
 con: *Console,
 
-timer: ?uefi.Event = null,
+timer: Timer = Timer.empty,
 
 group:   GroupWindow,
 option: ?OptionWindow = null,
-
-const timer_second: u64 = @intCast(@divTrunc(
-        std.Io.Duration.fromSeconds(1).toNanoseconds(), 100
-));
 
 pub fn init(cfg: *const Config, con: *Console) Self {
     var out = Self{
@@ -37,16 +33,7 @@ pub fn init(cfg: *const Config, con: *Console) Self {
         .group = GroupWindow.init(cfg.items, cfg.pagelen),
     };
     if (cfg.timeout > 0) {
-        const timer = globals.boot_services.createEvent(.{
-            .timer = true,
-        }, .{}) catch return out;
-        if (globals.boot_services.setTimer(
-                timer, .relative, timer_second * cfg.timeout
-        )) {
-            out.timer = timer;
-        } else |_| {
-            globals.boot_services.closeEvent(timer) catch {};
-        }
+        out.timer = Timer.create(cfg.timeout) catch Timer.empty;
     }
     return out;
 }
@@ -56,9 +43,11 @@ pub fn init(cfg: *const Config, con: *Console) Self {
 pub fn step(self: *Self) SelectorError!?Config.Option {
     try self.redraw();
 
-    if (try self.con.waitForKey(self.timer))
+    if (try self.con.waitForKey(self.timer.event))
         return self.input(try self.con.readInput());
-    return self.cfg.defaultOption();
+    if (self.timer.tick())
+        return self.cfg.defaultOption();
+    return null;
 }
 
 fn select(self: *Self, value: ?usize) ?Config.Option {
@@ -84,11 +73,7 @@ fn select(self: *Self, value: ?usize) ?Config.Option {
 fn input(self: *Self, in: Console.Input) SelectorError!?Config.Option {
     // TODO: destroy?
     // if a timer is running, stop it
-    if (self.timer) |timer| {
-        globals.boot_services.setTimer(timer, .cancel, 0) catch {};
-        globals.boot_services.closeEvent(timer) catch {};
-        self.timer = null;
-    }
+    self.timer.destroy() catch {};
 
     switch (in) {
         .down_arrow => {
@@ -169,10 +154,10 @@ pub fn format(self: Self, w: *std.Io.Writer) error{WriteFailed}!void {
 }
 
 fn formatTimer(self: Self, w: *std.Io.Writer) error{WriteFailed}!void {
-    if (self.timer) |_| {
+    if (self.timer.running()) {
         const opt = self.cfg.defaultOption();
-        return w.print("Booting default option in {}s: {f} > {f}\r\n", .{
-            self.cfg.timeout, opt.parent, opt
+        return w.print("Booting default option in {:02}s: {f} > {f}\r\n", .{
+            self.timer.counter, opt.parent, opt
         });
     }
     return w.writeAll("\r\n");
@@ -262,3 +247,49 @@ fn Window(comptime T: type) type {
         }
     };
 }
+
+const Timer = struct {
+    event: ?uefi.Event = null,
+    counter: usize = 0,
+
+    const second: u64 = @intCast(@divTrunc(
+            std.Io.Duration.fromSeconds(1).toNanoseconds(), 100
+    ));
+
+    pub inline fn running(self: Timer) bool {
+        return self.event != null;
+    }
+
+    pub fn cancel(self: *Timer) !void {
+        if (self.event) |ev|
+            try globals.boot_services.setTimer(ev, .cancel, 0);
+    }
+
+    pub fn tick(self: *Timer) bool {
+        self.counter -|= 1;
+        if (self.counter == 0) {
+            self.cancel() catch {};
+            return true;
+        }
+        return false;
+    }
+
+    pub fn create(seconds: usize) !Timer {
+        const bs = globals.boot_services;
+
+        const timer = try bs.createEvent(.{.timer = true,}, .{});
+        errdefer bs.closeEvent(timer) catch {};
+
+        try bs.setTimer(timer, .periodic, second);
+        return .{ .event = timer, .counter = seconds };
+    }
+
+    pub fn destroy(self: *Timer) !void {
+        try self.cancel();
+        if (self.event) |ev|
+            try globals.boot_services.closeEvent(ev);
+        self.event = null;
+    }
+
+    const empty: Timer = .{};
+};
