@@ -32,7 +32,10 @@ pub fn getCursor(self: *Self) union(enum) {
 } {
     const mode = self.output.mode;
     if (!mode.cursor_visible) return .disabled;
-    return .{ .enabled = .{ .row = mode.cursor_row, .col = mode.cursor_column }};
+    return .{ .enabled = .{
+        .row = @intCast(mode.cursor_row),
+        .col = @intCast(mode.cursor_column),
+    }};
 }
 
 pub fn setCursor(
@@ -42,11 +45,14 @@ pub fn setCursor(
         position: struct { row: usize, col: usize },
     },
 ) !void {
-    try switch (state) {
-        .enabled  => self.output.enableCursor(true),
-        .disabled => self.output.enableCursor(false),
-        .position => |p| self.output.setCursorPosition(p.col, p.row),
-    };
+    switch (state) {
+        .enabled  => try self.output.enableCursor(true),
+        .disabled => try self.output.enableCursor(false),
+        .position => |p| {
+            try self.setCursor(.enabled);
+            try self.output.setCursorPosition(p.col, p.row);
+        },
+    }
 }
 
 // std.Io.Writer; this is a bit evil btw
