@@ -27,15 +27,14 @@ group:   GroupWindow,
 option: ?OptionWindow = null,
 
 pub fn init(cfg: *const Config, con: *Console) Self {
-    var out = Self{
+    return Self{
         .cfg = cfg,
         .con = con,
         .group = GroupWindow.init(cfg.items, cfg.pagelen),
+        .timer = if (cfg.timeout > 0 and cfg.defaultOption() != null)
+            Timer.create(cfg.timeout) catch Timer.empty
+                                      else  Timer.empty,
     };
-    if (cfg.timeout > 0) {
-        out.timer = Timer.create(cfg.timeout) catch Timer.empty;
-    }
-    return out;
 }
 
 // TODO: destroy
@@ -278,12 +277,16 @@ const Timer = struct {
     }
 
     pub fn format(self: *const Timer, w: *std.Io.Writer) error{WriteFailed}!void {
-        if (!self.running()) return w.writeAll("\r\n");
         const parent: *const Self = @fieldParentPtr("timer", self);
-        const option = parent.cfg.defaultOption();
-        return w.print("Booting default option in {:02}s: {f} > {f}\r\n", .{
-            self.counter, option.parent, option
-        });
+        return if (parent.cfg.defaultOption()) |option|
+            if (self.running())
+                w.print("Booting default option in {:02}s: {f} > {f}\r\n", .{
+                    self.counter, option.parent, option
+                })
+            else w.writeAll("\r\n")
+        else w.writeAll(
+            "Timer is disabled because a default boot option oculd not be found.\r\n"
+        );
     }
 
     const empty: Timer = .{};

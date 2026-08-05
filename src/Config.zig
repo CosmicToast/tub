@@ -25,6 +25,8 @@ timeout: u8 = 5,
 /// Set with !p[agelen] number.
 pagelen: u8 = 10,
 
+default: []const u8 = "",
+
 // DevicePath to use in constructing the chainload DevicePath.
 device: *const DevicePath,
 
@@ -39,7 +41,7 @@ pub fn load(gpa: Allocator) Error!*Config {
     var out = gpa.create(Config) catch return Error.OutOfResources;
     errdefer out.destroy(gpa);
 
-    out.timeout = 5; out.pagelen = 10;
+    out.timeout = 5; out.pagelen = 10; out.default = &.{};
     out.device = globals.devicepath;
 
     var root = try File.fromImage(gpa);
@@ -90,6 +92,8 @@ fn loadFile(
     var it = mem.splitScalar(u8, buf, '\n');
     while (it.next()) |sline| switch (Line.create(@constCast(sline))) {
         .comment, .unrecognized => {},
+        // NOTE: "" = disable filtering
+        .default => |v| self.default = v,
         // NOTE: 0 = disable timer
         .timeout => |v| self.timeout = v,
         // NOTE: > 27 is not possible, 0 is nonsensical
@@ -117,12 +121,16 @@ pub fn destroy(self: *Config, gpa: Allocator) void {
     gpa.destroy(self);
 }
 
-// TODO: maybe allow a !default and do a comparison here?
-pub fn defaultOption(self: Config) Option {
+pub fn defaultOption(self: Config) ?Option {
     for (self.items) |group| {
-        for (group.items) |item| return item;
+        for (group.items) |item| {
+            // if default is set, the default item we pick must match
+            if (self.default.len > 0) {
+                if (text.glob(self.default, item.path)) return item;
+            } else return item;
+        }
     }
-    @panic("Config: could not pick a default option");
+    return null;
 }
 
 /// A config file line that represents a boot group.
@@ -177,6 +185,7 @@ const Line = union(enum) {
     include: []const u8,
     timeout: u8,
     pagelen: u8,
+    default: []const u8,
 
     comment, unrecognized,
 
@@ -191,6 +200,7 @@ const Line = union(enum) {
         // !S[omething] payload
         if (line.len < 2) return .unrecognized;
         return switch (line[1]) {
+            'd'  => createDefault(line[1..]),
             't'  => createTimeout(line[1..]),
             'i'  => createInclude(line[1..]),
             'p'  => createPagelen(line[1..]),
@@ -232,6 +242,13 @@ const Line = union(enum) {
         const payload = skipToPayload(line);
         return if (std.fmt.parseUnsigned(u8, payload, 10)) |int|
             .{ .pagelen = int } else |_| .unrecognized;
+    }
+
+    fn createDefault(line: []const u8) Line {
+        std.debug.assert(line[0] == 'd');
+        const payload = skipToPayload(line);
+        // TODO: this globs against the internal representation
+        return .{ .default = payload };
     }
 };
 

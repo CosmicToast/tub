@@ -5,38 +5,83 @@ const Config = @import("Config.zig");
 
 const Error = std.os.uefi.Error;
 
-pub fn glob(pattern: []const u8, text: []const u16) bool {
-    var view = unicode.Utf8View.init(pattern) catch return false; // TODO: maybe error?
-    var it = view.iterator();
-    return globUcs2Worker(&it, text);
+pub fn glob(pattern: anytype, text: anytype) bool {
+    // TODO: maybe error?
+    var pat = Iterator.create(pattern) catch return false;
+    var txt = Iterator.create(text)    catch return false;
+    return globWorker(&pat, &txt);
 }
 
-fn globUcs2Worker(it: *unicode.Utf8Iterator, textsrc: []const u16) bool {
-    var text = textsrc;
-    while (it.nextCodepoint()) |c| {
+fn globWorker(pat: *Iterator, txt: *Iterator) bool {
+    while (pat.nextCodepoint()) |c| {
         if (c != '*') {
-            if (text.len == 0) return false;
-            if (text[0] != c) return false;
-            text = text[1..];
-            continue;
+            if (txt.nextCodepoint()) |v| {
+                if (v != c) return false;
+                continue;
+            } else return false;
         }
         // c == '*'
-        {
-            const i = it.i;
-            defer it.i = i;
-            // if we end on a '*', all remnants are guaranteed to match
-            if (it.nextCodepoint() == null) return true;
+
+        // if we end on a '*', all remnants are guaranteed to match
+        if (pat.peekCodepoint() == null) return true;
+
+        while (true) {
+            // copy to effectively save position
+            var pat2 = pat.*; var txt2 = txt.*;
+            if (globWorker(&pat2, &txt2)) return true;
+
+            // we're out of text, but there's more characters to glob
+            // this also advances the pointer
+            if (txt.nextCodepoint() == null) return false;
         }
-        for (0..text.len) |i| {
-            // copy it to effectively save the position
-            var it2 = it.*;
-            if (globUcs2Worker(&it2, text[i..])) return true;
-        }
-        return false;
     }
     // ran out of codepoints in pattern, make sure text is empty
-    return text.len == 0;
+    return txt.peekCodepoint() == null;
 }
+
+const Iterator = union(enum) {
+    utf8: unicode.Utf8Iterator,
+    ucs2: struct {
+        data: []const u16,
+        idx: usize,
+
+        pub fn peekCodepoint(self: @This()) ?u21 {
+            if (self.data.len == self.idx) return null;
+            return self.data[self.idx];
+        }
+
+        pub fn nextCodepoint(self: *@This()) ?u21 {
+            if (self.data.len == self.idx) return null;
+            self.idx += 1;
+            return self.data[self.idx - 1];
+        }
+    },
+
+    pub inline fn peekCodepoint(self: *Iterator) ?u21 {
+        return switch (self.*) {
+            .utf8 => |*it| it.peekCodepoint(),
+            .ucs2 => |*it| it.peekCodepoint(),
+        };
+    }
+
+    pub inline fn nextCodepoint(self: *Iterator) ?u21 {
+        return switch (self.*) {
+            .utf8 => |*it| it.nextCodepoint(),
+            .ucs2 => |*it| it.nextCodepoint(),
+        };
+    }
+
+    pub fn create(data: anytype) !Iterator {
+        return switch (@TypeOf(data)) {
+            unicode.Utf8View => .{ .utf8 = data.iterator() },
+            else => |T| switch (std.meta.Elem(T)) {
+                u8  => Iterator.create(try unicode.Utf8View.init(data)),
+                u16 => .{ .ucs2 = .{ .data = data, .idx = 0 }},
+                else => @compileError("unknown type to iterate on"),
+            }
+        };
+    }
+};
 
 // UCS-2 <-> UTF-8 utilities
 pub fn calcUcs2Len(utf8: []const u8) Error!usize {

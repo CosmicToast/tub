@@ -94,6 +94,11 @@ character after the *!*, but it is recommended to type out the entire directive
 nonetheless. The payload is everything after the first set of spaces on the
 line. The available directives are:
 
+- *!default*: A globbing pattern that the internal representation of each boot
+option path will be compared against. The first matching one is selected as the
+default boot option. To disable globbing, have a line with just "!default" in
+it. Since the internal representation is not particularly intuitive, it is
+recommended to set this to something like *\*myfile.efi*, if at all.
 - *!timeout*: How long to wait until booting the default option, in seconds. Set
 to 0 to disable the default boot timer. The maximum value is 255, i.e. 4 minutes
 and 15 seconds.

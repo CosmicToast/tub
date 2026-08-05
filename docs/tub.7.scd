@@ -51,9 +51,10 @@ On startup, a timer is started for *!timeout* seconds (if timeout is set to >0).
 At the end of this timer, if no keys have been pressed up to that point, the
 default boot option will be automatically picked.
 
-The default boot option is the first option in the first non-empty group. It is
-planned to allow customizing this further to be the first option matching the
-glob payload.
+The default boot option is the first option that matches the default directive
+(or simply the first option in the first non-empty group if that's empty). Note
+that the glob is performed against an internal representation of the path. See
+_tub.conf_(5) for recommendations on how to compose your pattern.
 
 # SELECTION MENU
 
