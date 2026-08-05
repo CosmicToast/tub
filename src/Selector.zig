@@ -39,6 +39,7 @@ pub fn init(cfg: *const Config, con: *Console) Self {
 pub const Selection = union(enum) {
     reboot, exit,
     boot: Config.Option,
+    edit: Config.Option,
 };
 
 pub fn step(self: *Self) SelectorError!?Selection {
@@ -120,19 +121,11 @@ fn input(self: *Self, in: Console.Input) SelectorError!?Selection {
         .delete => return .reboot,
         .home => return .exit,
 
-        .text => |c| switch (c) {
-            '\r' => if (self.select(null)) |o| return .{ .boot = o },
-            'a'...'z' => {
-                const idx = c - 'a';
-                if (self.select(idx)) |o| return .{ .boot = o };
-            },
-            'A'...'Z' => {
-                const idx = c - 'A';
-                // TODO: line editor
-                if (self.select(idx)) |o| return .{ .boot = o };
-            },
-
-            else => {}
+        .text => |c| return switch (c) {
+            '\r'      => if (self.select(null))    |o| .{ .boot = o } else null,
+            'a'...'z' => if (self.select(c - 'a')) |o| .{ .boot = o } else null,
+            'A'...'Z' => if (self.select(c - 'A')) |o| .{ .edit = o } else null,
+            else => null
         },
 
         else => {}

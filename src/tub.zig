@@ -101,6 +101,10 @@ fn main() !void {
             .reboot => reboot(),
             .exit   => return,
             .boot   => |o| _ = try o.chainload(uefi.pool_allocator, null),
+            .edit   => |o| {
+                // TODO: line editor
+                _ = try o.chainload(uefi.pool_allocator, null);
+            },
         }
     }
 }
