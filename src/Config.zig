@@ -291,7 +291,7 @@ pub const Group = struct {
             break :blk try items.toOwnedSlice(gpa);
         };
 
-        out.line.sorter.sort(out.items);
+        out.line.sorter.sortField(Option, out.items, "path");
     }
 
     pub fn destroy(self: *Group, gpa: Allocator) void {

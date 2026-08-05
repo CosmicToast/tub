@@ -1,8 +1,6 @@
 const std = @import("std");
 const unicode = std.unicode;
 
-const Config = @import("Config.zig");
-
 const Error = std.os.uefi.Error;
 
 pub fn glob(pattern: anytype, text: anytype) bool {
@@ -158,19 +156,7 @@ pub const Sorter = packed struct {
     reverse: bool, // greatest goes first
     // TODO: other modes?
 
-    pub fn lessFn(comptime T: type
-    ) fn (self: Sorter, lhs: T, rhs: T) bool {
-        return switch (T) {
-            []const u8, []u8 => lessThanStr,
-            Config.Option    => lessThanOption,
-            else => @compileError("can't generate lessFn for unknown type"),
-        };
-    }
-
-    pub fn lessThanOption(self: Sorter, lhs: Config.Option, rhs: Config.Option) bool {
-        return lessThanStr(self, lhs.path, rhs.path);
-    }
-    pub fn lessThanStr(self: Sorter, lhs: []const u8, rhs: []const u8) bool {
+    pub fn lessFn(self: Sorter, lhs: []const u8, rhs: []const u8) bool {
         const l, const r = blk: {
             if (self.path) break :blk .{lhs, rhs};
             break :blk .{path.filename(lhs), path.filename(rhs)};
@@ -190,9 +176,19 @@ pub const Sorter = packed struct {
         return out;
     }
 
-    pub inline fn sort(self: Sorter, items: anytype) void {
-        const T = std.meta.Elem(@TypeOf(items));
-        const F = lessFn(T);
+    pub inline fn sortField(
+        self: Sorter,
+        comptime T: type,
+        items: []T,
+        comptime field_name: []const u8
+    ) void {
+        const F = struct {
+            pub fn lessFn(s: Sorter, lhs: T, rhs: T) bool {
+                const l = @field(lhs, field_name);
+                const r = @field(rhs, field_name);
+                return s.lessFn(l, r);
+            }
+        }.lessFn;
         return std.mem.sort(T, items, self, F);
     }
 };
