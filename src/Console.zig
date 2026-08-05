@@ -7,7 +7,6 @@ const std     = @import("std");
 const uefi    = std.os.uefi;
 const unicode = std.unicode;
 
-const globals = @import("globals.zig");
 const text = @import("text.zig");
 
 // Protocols
@@ -183,7 +182,7 @@ pub const Input = union(enum(u16)) {
 };
 
 pub fn waitForKey(self: *Self, event: ?uefi.Event) !enum{ input, event } {
-    const bs = globals.boot_services;
+    const bs = uefi.system_table.boot_services.?;
     var events = [2]uefi.Event{self.input.wait_for_key, self.input.wait_for_key};
     if (event) |e| {
         events[1] = e;
