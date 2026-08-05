@@ -176,7 +176,27 @@ const Buffer = struct {
     /// See std.Io.Writer.print.
     pub fn format(self: *Buffer, w: *std.Io.Writer) !void {
         for (self.leftb())  |c| try w.printUnicodeCodepoint(c);
-        try w.printUnicodeCodepoint('|'); // FIXME: soft cursor
+        // 0x2588 is the BLOCKELEMENT LIGHT SHADE
+        // it's the best "cursor-like" I can do in theory, I think
+        //
+        // why do I have to do this weird soft cursor thing?
+        // so, unfortunately, cursor positioning / mode geometry
+        // is implementation-driven, and it turns out, implementations SUCK
+        // the reports are just way off on the reads, but seemingly correct on writes
+        // which means that I simply cannot get cursor positions or geometry and trust it
+        //
+        // this means a soft cursor is necessary. this is where more bad news comes in
+        // implementations are required to support a few drawing characters
+        // they don't seem to be required to support anything else
+        // furthermore, "support" doesn't mean "draw to spec"
+        // it just means "draw something". EDK2 draws a "*" for this one, for example
+        //
+        // ultimately though, this is just about as good as it's going to get
+        // I can't detect the wrong character being used or being absent
+        // I can't detect the mode lying to me
+        // so I just pick the closest "seems reasonable" character and hope for the best
+        // hopefully you won't need to edit your cmdline *too* often :D
+        try w.printUnicodeCodepoint(0x2588);
         for (self.rightb()) |c| try w.printUnicodeCodepoint(c);
     }
 
