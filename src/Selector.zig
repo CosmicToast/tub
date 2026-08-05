@@ -148,29 +148,14 @@ fn redraw(self: Self) error{WriteFailed}!void {
 }
 
 pub fn format(self: Self, w: *std.Io.Writer) error{WriteFailed}!void {
-    try self.formatTimer(w);
-    try self.formatPrompt(w);
-    if (self.option) |o| try o.format(w)
-    else try self.group.format(w);
-}
-
-fn formatTimer(self: Self, w: *std.Io.Writer) error{WriteFailed}!void {
-    if (self.timer.running()) {
-        const opt = self.cfg.defaultOption();
-        return w.print("Booting default option in {:02}s: {f} > {f}\r\n", .{
-            self.timer.counter, opt.parent, opt
+    return if (self.option) |o|
+        w.print("{f}Select boot option: {f} >\r\n{f}", .{
+            &self.timer, self.group.select(), o
+        })
+    else
+        w.print("{f}Select boot group:\r\n{f}", .{
+            &self.timer, self.group
         });
-    }
-    return w.writeAll("\r\n");
-}
-
-fn formatPrompt(self: Self, w: *std.Io.Writer) error{WriteFailed}!void {
-    if (self.option) |_|
-        // return w.writeAll("Select boot option:\r\n");
-        return w.print("Select boot option: {f} >\r\n", .{
-            self.group.select()
-        });
-    return w.writeAll("Select boot group:\r\n");
 }
 
 const GroupWindow  = Window(Config.Group);
@@ -290,6 +275,15 @@ const Timer = struct {
         if (self.event) |ev|
             try globals.boot_services.closeEvent(ev);
         self.event = null;
+    }
+
+    pub fn format(self: *const Timer, w: *std.Io.Writer) error{WriteFailed}!void {
+        if (!self.running()) return w.writeAll("\r\n");
+        const parent: *const Self = @fieldParentPtr("timer", self);
+        const option = parent.cfg.defaultOption();
+        return w.print("Booting default option in {:02}s: {f} > {f}\r\n", .{
+            self.counter, option.parent, option
+        });
     }
 
     const empty: Timer = .{};
