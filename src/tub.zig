@@ -80,6 +80,12 @@ pub export fn EfiMain(
     return @intFromEnum(uefi.Status.success);
 }
 
+inline fn reboot() noreturn {
+    uefi.system_table.runtime_services.resetSystem(
+        // TODO: "user requested reboot"; difficulty is align(2)
+        .warm, .success, null);
+}
+
 fn main() !void {
     var console = Console.init();
 
@@ -89,16 +95,12 @@ fn main() !void {
 
     var ui = Selector.init(cfg, &console);
     while (true) {
-        const opt = ui.step() catch |err| switch (err) {
-            error.RebootRequested =>
-                uefi.system_table.runtime_services.resetSystem(
-                    .warm,
-                    .success,
-                    null // TODO: "user requested reboot"; difficulty is align(2)
-                ),
-            error.ExitRequested => return,
-            else => return err,
-        };
-        if (opt) |o| _ = try o.chainload(uefi.pool_allocator, null);
+        const opt = try ui.step();
+        if (opt == null) continue;
+        switch (opt.?) {
+            .reboot => reboot(),
+            .exit   => return,
+            .boot   => |o| _ = try o.chainload(uefi.pool_allocator, null),
+        }
     }
 }

@@ -9,14 +9,11 @@ const Console = @import("Console.zig");
 
 const ReadKeyStrokeError = uefi.protocol.SimpleTextInput.ReadKeyStrokeError;
 const WaitForEventError  = uefi.tables.BootServices.WaitForEventError;
+const WriterError        = std.Io.Writer.Error;
 
 const Self = @This();
 
-const SelectorError = error {
-    WriteFailed,
-    RebootRequested,
-    ExitRequested,
-} || WaitForEventError || ReadKeyStrokeError;
+const SelectorError = WriterError || WaitForEventError || ReadKeyStrokeError;
 
 cfg: *const Config,
 con: *Console,
@@ -39,13 +36,20 @@ pub fn init(cfg: *const Config, con: *Console) Self {
 
 // TODO: destroy
 
-pub fn step(self: *Self) SelectorError!?Config.Option {
+pub const Selection = union(enum) {
+    reboot, exit,
+    boot: Config.Option,
+};
+
+pub fn step(self: *Self) SelectorError!?Selection {
     try self.redraw();
 
     return switch (try self.con.waitForKey(self.timer.event)) {
         .input => self.input(try self.con.readInput()),
         .event => if (self.timer.tick())
-            self.cfg.defaultOption() else null,
+            if (self.cfg.defaultOption()) |o|
+                .{ .boot = o } else null
+            else null,
 
     };
 }
@@ -70,7 +74,7 @@ fn select(self: *Self, value: ?usize) ?Config.Option {
     return null;
 }
 
-fn input(self: *Self, in: Console.Input) SelectorError!?Config.Option {
+fn input(self: *Self, in: Console.Input) SelectorError!?Selection {
     // TODO: destroy?
     // if a timer is running, stop it
     self.timer.destroy() catch {};
@@ -106,31 +110,26 @@ fn input(self: *Self, in: Console.Input) SelectorError!?Config.Option {
         },
 
         .right_arrow => {
-            if (self.select(null)) |o| return o;
+            if (self.select(null)) |o| return .{ .boot = o };
         },
 
         .escape, .left_arrow => {
             if (self.option) |_| self.option = null;
         },
 
-        .delete => {
-            return SelectorError.RebootRequested;
-        },
-
-        .home => {
-            return SelectorError.ExitRequested;
-        },
+        .delete => return .reboot,
+        .home => return .exit,
 
         .text => |c| switch (c) {
-            '\r' => if (self.select(null)) |o| return o,
+            '\r' => if (self.select(null)) |o| return .{ .boot = o },
             'a'...'z' => {
                 const idx = c - 'a';
-                if (self.select(idx)) |o| return o;
+                if (self.select(idx)) |o| return .{ .boot = o };
             },
             'A'...'Z' => {
                 const idx = c - 'A';
                 // TODO: line editor
-                if (self.select(idx)) |o| return o;
+                if (self.select(idx)) |o| return .{ .boot = o };
             },
 
             else => {}
