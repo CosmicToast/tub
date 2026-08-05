@@ -52,7 +52,8 @@ pub fn load(gpa: Allocator) Error!*Config {
 
     // read all the config files recursively
     // populating buffers (out.storage) and getting lines
-    const lines = try loadFile(out, root, "tub.conf", gpa, &buffers);
+    const lines = loadFile(out, root, "tub.conf", gpa, &buffers)
+        catch &BootLine.default;
     errdefer gpa.free(lines);
     out.storage = buffers.toOwnedSlice(gpa)
         catch return Error.OutOfResources;
@@ -176,6 +177,29 @@ const BootLine = struct {
     pub fn format(self: BootLine, w: *std.Io.Writer) !void {
         try w.writeAll(self.buf);
     }
+
+    const default = [_]BootLine{.{
+        .buf     = ":/*.efi:Root (%n):%b:",
+        .sorter  = text.Sorter.init(""),
+        .pattern = "\\*.efi",
+        .group   = "Root (%n)",
+        .fmt     = "%b",
+        .cmdline = "",
+    }, .{
+        .buf     = ":/tools/*.efi:Tools (%n):%b:",
+        .sorter  = text.Sorter.init(""),
+        .pattern = "\\tools\\*.efi",
+        .group   = "Tools (%n)",
+        .fmt     = "%b",
+        .cmdline = "",
+    }, .{
+        .buf     = ":/EFI/BOOT/BOOT*:Default:%p:",
+        .sorter  = text.Sorter.init(""),
+        .pattern = "\\EFI\\BOOT\\BOOT*",
+        .group   = "Default",
+        .fmt     = "%p",
+        .cmdline = "",
+    }};
 };
 
 const Line = union(enum) {

@@ -90,8 +90,11 @@ inline fn reboot() noreturn {
 fn main() !void {
     var console = Console.init();
 
+    // TODO: switch on the errors
+    // default config is now handled inside of Config.load
+    // see Config.BootLine.default
     var cfg = Config.load(uefi.pool_allocator)
-        catch return Error.NotFound; // TODO: default config
+        catch return Error.NotFound;
     defer cfg.destroy(uefi.pool_allocator);
 
     var ui = Selector.init(cfg, &console);
