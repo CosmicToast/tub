@@ -27,6 +27,29 @@ pub fn clear(self: *Self) void {
     self.output.clearScreen() catch {};
 }
 
+pub fn getCursor(self: *Self) union(enum) {
+    disabled,
+    enabled: struct {row: usize, col: usize },
+} {
+    const mode = self.output.mode;
+    if (!mode.cursor_visible) return .disabled;
+    return .{ .enabled = .{ .row = mode.cursor_row, .col = mode.cursor_column }};
+}
+
+pub fn setCursor(
+    self: *Self,
+    state: union(enum) {
+        enabled, disabled,
+        position: struct { row: usize, col: usize },
+    },
+) !void {
+    try switch (state) {
+        .enabled  => self.output.enableCursor(true),
+        .disabled => self.output.enableCursor(false),
+        .position => |p| self.output.setCursorPosition(p.col, p.row),
+    };
+}
+
 // std.Io.Writer; this is a bit evil btw
 const Writer = std.Io.Writer;
 fn drainStr(out: *STO, str: []const u8) Writer.Error!usize {
