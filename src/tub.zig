@@ -3,6 +3,7 @@ const uefi = std.os.uefi;
 
 const Console  = @import("Console.zig");
 const Config   = @import("Config.zig");
+const Editor   = @import("Editor.zig");
 const File     = @import("File.zig");
 const Selector = @import("Selector.zig");
 const globals  = @import("globals.zig");
@@ -102,8 +103,12 @@ fn main() !void {
             .exit   => return,
             .boot   => |o| _ = try o.chainload(uefi.pool_allocator, null),
             .edit   => |o| {
-                // TODO: line editor
-                _ = try o.chainload(uefi.pool_allocator, null);
+                var arena = std.heap.ArenaAllocator.init(uefi.pool_allocator);
+                defer arena.deinit();
+                const alloc = arena.allocator();
+
+                const initial = o.parent.line.cmdline;
+                _ = try o.chainload(alloc, try Editor.edit(initial, alloc));
             },
         }
     }
