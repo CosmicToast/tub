@@ -99,6 +99,6 @@ fn main() !void {
             error.ExitRequested => return,
             else => return err,
         };
-        if (opt) |o| _ = try o.chainload(uefi.pool_allocator);
+        if (opt) |o| _ = try o.chainload(uefi.pool_allocator, null);
     }
 }

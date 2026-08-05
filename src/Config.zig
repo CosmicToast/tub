@@ -325,7 +325,7 @@ pub const Option = struct {
     parent: *const Group,
     path: []const u8,
 
-    pub fn chainload(self: Option, gpa: Allocator) Error!ImageExitData {
+    pub fn chainload(self: Option, gpa: Allocator, cmdline: ?[]const u16) Error!ImageExitData {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
         var alloc = arena.allocator();
@@ -344,26 +344,29 @@ pub const Option = struct {
             false, uefi.handle, .{ .device_path = dp }
         );
 
-        const cmd = self.parent.line.cmdline;
+        const cmd: []const u16 = if (cmdline) |cmd| cmd else blk: {
+            const cmd = self.parent.line.cmdline;
+            if (cmd.len == 0) break :blk ([0]u16{})[0..0];
+
+            const len = try text.calcUcs2Len(cmd);
+            const out = alloc.alloc(u16, len)
+                catch return error.OutOfResources;
+            const real = try text.utf8ToUcs2(out, cmd);
+            std.debug.assert(real == len);
+            break :blk out;
+        };
+
         if (cmd.len > 0) {
-            // uefi stub treats loadoptions as a []u16
-            // so we have to cast to ucs2
-            const buf = blk: {
-                const len  = try text.calcUcs2Len(cmd);
-                const out  = alloc.allocSentinel(u16, len, 0)
-                    catch return error.OutOfResources;
-                const real = try text.utf8ToUcs2(out, cmd);
-                std.debug.assert(real == len);
-                break :blk out;
-            };
+            const final = alloc.dupeSentinel(u16, cmd, 0)
+                catch return error.OutOfResources;
+
             const limg = try globals.boot_services.handleProtocol(LoadedImage, img)
                 orelse return error.LoadError;
-            // systemd stub expects UCS-2 formatting and size in bytes
-            // 1+ is the sentinel
-            const len = @sizeOf(u16) * (buf.len + 1);
-            std.debug.assert(len <= std.math.maxInt(u32)); // cmdline too big
+            const len = @sizeOf(u16) * (final.len + 1);
+            std.debug.assert(len <= std.math.maxInt(u32));
+
             limg.load_options_size = @truncate(len);
-            limg.load_options = @ptrCast(buf.ptr);
+            limg.load_options = @ptrCast(final.ptr);
         }
 
         return globals.boot_services.startImage(img);
