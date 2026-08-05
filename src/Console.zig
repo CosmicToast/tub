@@ -159,16 +159,16 @@ pub const Input = union(enum(u16)) {
     }
 };
 
-pub fn waitForKey(self: *Self, event: ?uefi.Event) !bool {
+pub fn waitForKey(self: *Self, event: ?uefi.Event) !enum{ input, event } {
     const bs = globals.boot_services;
     var events = [2]uefi.Event{self.input.wait_for_key, self.input.wait_for_key};
     if (event) |e| {
         events[1] = e;
         _, const idx = try bs.waitForEvent(events[0..]);
-        return idx == 0;
+        return if (idx == 0) .input else .event;
     }
     _ = try bs.waitForEvent(events[0..1]);
-    return true;
+    return .input;
 }
 
 pub inline fn readInput(self: *Self) !Input {

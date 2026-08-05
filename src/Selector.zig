@@ -43,11 +43,12 @@ pub fn init(cfg: *const Config, con: *Console) Self {
 pub fn step(self: *Self) SelectorError!?Config.Option {
     try self.redraw();
 
-    if (try self.con.waitForKey(self.timer.event))
-        return self.input(try self.con.readInput());
-    if (self.timer.tick())
-        return self.cfg.defaultOption();
-    return null;
+    return switch (try self.con.waitForKey(self.timer.event)) {
+        .input => self.input(try self.con.readInput()),
+        .event => if (self.timer.tick())
+            self.cfg.defaultOption() else null,
+
+    };
 }
 
 fn select(self: *Self, value: ?usize) ?Config.Option {
