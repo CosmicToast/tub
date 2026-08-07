@@ -1,34 +1,40 @@
 //! Wraps UEFI's con_in and con_out to handle input and output.
-//! The biggest catch is that both of these are in UCS-2.
-
-const Self = @This();
-
-const std     = @import("std");
-const uefi    = std.os.uefi;
-const unicode = std.unicode;
+const std  = @import("std");
+const uefi = std.os.uefi;
+const uni  = std.unicode;
+const Writer       = std.Io.Writer;
+const STI          = uefi.protocol.SimpleTextInput;
+const STO          = uefi.protocol.SimpleTextOutput;
+const BootServices = uefi.tables.BootServices;
 
 const text = @import("text.zig");
 
-// Protocols
-const STI = uefi.protocol.SimpleTextInput;
-const STO = uefi.protocol.SimpleTextOutput;
+const Console = @This();
 
-// Tables
-const BootServices = uefi.tables.BootServices;
-
+/// An implementation of std.Io.Writer that calls into SimpleTextOutput.
 writer: Writer,
+
+/// The backing SimpleTextInput instance.
 input:  *STI,
+
+/// The backing SimpleTextOutput instance.
 output: *STO,
 
-// Writing utilities.
-pub fn clear(self: *Self) void {
-    // if it doesn't work, then it doesn't work, that's fine
+/// Clears the screen. Best effort: fails silently on failure.
+pub fn clear(self: *Console) void {
     self.output.clearScreen() catch {};
 }
 
-pub fn getCursor(self: *Self) union(enum) {
+/// Represents a position on the screen in cells.
+const Position = struct { row: usize, col: usize };
+
+/// Gets the cursor status: it may be disabled or enabled and somewhere on the screen.
+///
+/// WARNING: UEFI implementations tend to be buggy.
+/// You cannot rely on the position's accuracy.
+pub fn getCursor(self: *Console) union(enum) {
     disabled,
-    enabled: struct {row: usize, col: usize },
+    enabled: Position,
 } {
     const mode = self.output.mode;
     if (!mode.cursor_visible) return .disabled;
@@ -38,11 +44,12 @@ pub fn getCursor(self: *Self) union(enum) {
     }};
 }
 
+/// Sets the cursor's position or status.
 pub fn setCursor(
-    self: *Self,
+    self: *Console,
     state: union(enum) {
         enabled, disabled,
-        position: struct { row: usize, col: usize },
+        position: Position,
     },
 ) !void {
     switch (state) {
@@ -56,11 +63,13 @@ pub fn setCursor(
 }
 
 // std.Io.Writer; this is a bit evil btw
-const Writer = std.Io.Writer;
+
+/// A helper for std.Io.Writer.VTable.drain.
+/// Writes a UTF-8 envoded string to SimpleTextOutput.
 fn drainStr(out: *STO, str: []const u8) Writer.Error!usize {
     // unchecked since we have to check for >0xffff anyway
     // this may be a mistake!
-    const view = unicode.Utf8View.initUnchecked(str);
+    const view = uni.Utf8View.initUnchecked(str);
     var it = view.iterator();
     var size: usize = 0;
     while (it.nextCodepoint()) |char| {
@@ -69,18 +78,19 @@ fn drainStr(out: *STO, str: []const u8) Writer.Error!usize {
         _ = out.outputString(&[_:0]u16{@truncate(char)})
             catch { return error.WriteFailed; }
             or    return error.WriteFailed;
-        size += unicode.utf8CodepointSequenceLength(char)
+        size += uni.utf8CodepointSequenceLength(char)
             catch return error.WriteFailed;
     }
     return size;
 }
 
+/// An implementation of std.Io.Writer.VTable.drain.
 fn drain (
     w: *Writer,
     data: []const []const u8,
     splat: usize
 ) Writer.Error!usize {
-    const self: *Self = @fieldParentPtr("writer", w);
+    const self: *Console = @fieldParentPtr("writer", w);
 
     // simplify later splatting logic
     const strs = if (splat == 0) data[0..data.len - 1] else data;
@@ -98,23 +108,27 @@ fn drain (
     return out;
 }
 
+/// A VTable implementing std.Io.Writer on top of SimpleTextOutput.
 const VTable: Writer.VTable = .{
     .drain = drain,
 };
 
-// Use this to write a UCS-2 string with no extra processing.
-pub fn writeUcs2(self: *Self, str: [:0]const u16) !void {
+/// A function to write a Ucs2 string directly to SimpleTextOutput.
+/// It is significantly more efficient than going through the writer.
+pub fn writeUcs2(self: *Console, str: [:0]const u16) !void {
     if (!try self.output.outputString(str.ptr))
         return error.WriteFailed;
 }
 
-pub fn writeLiteral(self: *Self, comptime str: []const u8) !void {
+/// A function to write a comptime UTF-8 string directly to SimpleTextOutput.
+/// It is significantly more efficient than going through the writer.
+pub fn writeLiteral(self: *Console, comptime str: []const u8) !void {
     return self.writeUcs2(text.utf8ToUcs2Literal(str));
 }
 
-// Reading utilities
-
+/// Represents a keypress from SimpleTextInput.
 pub const Input = union(enum(u16)) {
+    /// A valid unicode codepoint.
     text: u21 = 0x0,
 
     // SIMPLE_TEXT_INPUT
@@ -168,6 +182,7 @@ pub const Input = union(enum(u16)) {
     eject           = 0x106,
     // 0x8000-0xffff oem reserved
 
+    /// Translates from a SimpleTextInput tuple to our logical format.
     pub fn fromInput(input: STI.Key.Input) Input {
         return switch (input.scan_code) {
             0 => .{ .text = input.unicode_char },
@@ -179,6 +194,7 @@ pub const Input = union(enum(u16)) {
         };
     }
 
+    /// Translates to a SimpleTextInput tuple.
     pub fn toInput(self: Input) STI.Key.Input {
         return switch (self) {
             .text => |c| .{ .scan_code = 0, .unicode_char = @truncate(c) },
@@ -187,7 +203,9 @@ pub const Input = union(enum(u16)) {
     }
 };
 
-pub fn waitForKey(self: *Self, event: ?uefi.Event) !enum{ input, event } {
+/// Convenience function to wait for either a keypress or an event to fire.
+/// Returns which event fired.
+pub fn waitForKey(self: *Console, event: ?uefi.Event) !enum{ input, event } {
     const bs = uefi.system_table.boot_services.?;
     var events = [2]uefi.Event{self.input.wait_for_key, self.input.wait_for_key};
     if (event) |e| {
@@ -199,12 +217,17 @@ pub fn waitForKey(self: *Self, event: ?uefi.Event) !enum{ input, event } {
     return .input;
 }
 
-pub inline fn readInput(self: *Self) !Input {
+/// Convenience function to read a keystroke from SimpleTextInput.
+/// Note that a keystroke must already be ready. Use comined with `waitForKey`.
+pub inline fn readInput(self: *Console) !Input {
     return Input.fromInput(try self.input.readKeyStroke());
 }
 
 /// Initializes a console manager from the uefi system table.
-pub fn init() Self {
+/// Note that this will not create a buffer.
+/// As long as all instances are unbuffered,
+/// it's safe to create multiple instances.
+pub fn init() Console {
     return .{
         .writer= Writer {
             .buffer = &.{},
