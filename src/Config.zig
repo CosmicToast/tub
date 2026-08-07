@@ -1,21 +1,21 @@
+//! Configuration reader for the `tub(5)` format.
 const std  = @import("std");
 const mem  = std.mem;
 const uefi = std.os.uefi;
 const uni  = std.unicode;
-
-const globals = @import("globals.zig");
-const text    = @import("text.zig");
-
-const File    = @import("File.zig");
-
 const Allocator     = mem.Allocator;
 const DevicePath    = uefi.protocol.DevicePath;
 const Error         = uefi.Error;
 const ImageExitData = uefi.tables.BootServices.ImageExitData;
 const LoadedImage   = uefi.protocol.LoadedImage;
-const SplitIterator = mem.SplitIterator(u8, .scalar);
+
+const File    = @import("File.zig");
+const globals = @import("globals.zig");
+const text    = @import("text.zig");
 
 const Config = @This();
+
+const SplitIterator = mem.SplitIterator(u8, .scalar);
 
 /// How long to wait with no input to boot the default boot option.
 /// Set with !t[imeout] number.
@@ -25,6 +25,9 @@ timeout: u8 = 5,
 /// Set with !p[agelen] number.
 pagelen: u8 = 10,
 
+/// A glob pattern to match against the internal path representation of Options
+/// when picking a default boot option. Empty means no filtering takes place.
+/// Set with !d[efault] pattern.
 default: []const u8 = "",
 
 // DevicePath to use in constructing the chainload DevicePath.
@@ -36,7 +39,7 @@ storage: [][]u8,
 /// Configured boot groups.
 items: []Group,
 
-// assumes DevicePath, SFS volume
+/// Recursively reads the system's configuration from the corresponding tub.conf.
 pub fn load(gpa: Allocator) Error!*Config {
     var out = gpa.create(Config) catch return Error.OutOfResources;
     errdefer out.destroy(gpa);
@@ -74,6 +77,7 @@ pub fn load(gpa: Allocator) Error!*Config {
     return out;
 }
 
+/// Worker function that actually parses each individual file.
 fn loadFile(
     self: *Config,
     root: File,
@@ -114,6 +118,7 @@ fn loadFile(
     return out;
 }
 
+/// Frees backing storage (file buffers) and items.
 pub fn destroy(self: *Config, gpa: Allocator) void {
     for (self.storage) |file| gpa.free(file);
     gpa.free(self.storage);
@@ -122,6 +127,9 @@ pub fn destroy(self: *Config, gpa: Allocator) void {
     gpa.destroy(self);
 }
 
+/// Finds the default boot option. Note that no caching is done, meaning that if
+/// you have a globbing pattern set, it will repeatedly be called in a linear
+/// search.
 pub fn defaultOption(self: Config) ?Option {
     for (self.items) |group| {
         for (group.items) |item| {
@@ -151,6 +159,7 @@ const BootLine = struct {
     /// The command line to pass through when chainloading. Field 5.
     cmdline: []const u8,
 
+    /// Parses a line (should not contain \n). Returns null on errors to skip.
     pub fn create(line: []u8) ?BootLine {
         var it = mem.splitScalar(u8, line, ':');
         const sort    = text.Sorter.init(it.first());
@@ -175,6 +184,7 @@ const BootLine = struct {
         };
     }
 
+    /// See std.Io.Writer.print.
     pub fn format(self: BootLine, w: *std.Io.Writer) !void {
         try w.writeAll(self.buf);
     }
@@ -186,17 +196,36 @@ const BootLine = struct {
     };
 };
 
+/// Represents a line in the configuration file.
+/// A line may generally represent a boot group (BootLine),
+/// a directive (such as an !include), or may be empty/a comment.
 const Line = union(enum) {
+    /// A materialized boot group.
     boot: BootLine,
 
     // instead of having a sub-union these are inlined
+    /// A directive to include the file in the payload.
+    /// Globbing is unsupported.
     include: []const u8,
+    /// A directive to set the timeout for the default boot timer.
     timeout: u8,
+    /// A directive to set the maximum number of options that may be shown per
+    /// page.
     pagelen: u8,
+    /// A directive to set a globbing pattern to consider when selecting a
+    /// default boot option.
     default: []const u8,
 
-    comment, unrecognized,
+    /// A comment, meaning a line starting with #
+    comment,
 
+    /// An unrecognized line that will be ignored.
+    unrecognized,
+
+    /// Parses a physical configuration line, calling out to the appropriate
+    /// parser for each specific entry kind. You can tell the kind of line from
+    /// the first character (! is a directive and # is a comment), and the type
+    /// of directive from the 2nd character.
     pub fn create(line: []u8) Line {
         if (line.len == 0)  return .comment;
         if (line[0] == '#') return .comment;
@@ -209,13 +238,16 @@ const Line = union(enum) {
         if (line.len < 2) return .unrecognized;
         return switch (line[1]) {
             'd'  => createDefault(line[1..]),
-            't'  => createTimeout(line[1..]),
             'i'  => createInclude(line[1..]),
             'p'  => createPagelen(line[1..]),
+            't'  => createTimeout(line[1..]),
             else => .unrecognized,
         };
     }
 
+    /// Convenience function to get the payload of a directive.
+    /// The payload is defined as all the text after the first group of spaces
+    /// in the config line. This means a directive can never start with a space.
     fn skipToPayload(line: []const u8) []const u8 {
         std.debug.assert(line.len > 0);
         var i: usize = 0;
@@ -230,6 +262,8 @@ const Line = union(enum) {
         return line[i..];
     }
 
+    /// Parses a timeout, which is defined as an integer.
+    /// The maximum value is 255, which may be raised later.
     fn createTimeout(line: []const u8) Line {
         std.debug.assert(line[0] == 't');
         const payload = skipToPayload(line);
@@ -237,6 +271,7 @@ const Line = union(enum) {
             .{ .timeout = int } else |_| .unrecognized;
     }
 
+    /// Parses an include directive, which is defined as a path to include.
     fn createInclude(line: []u8) Line {
         std.debug.assert(line[0] == 'i');
         const payload = skipToPayload(line);
@@ -245,6 +280,9 @@ const Line = union(enum) {
         return .{ .include = payload };
     }
 
+    /// Parses a pagelen directive, which is defined as an integer.
+    /// The maximum value is 255, but in practice it's actually 27, since jump
+    /// labels >z are nonsensical.
     fn createPagelen(line: []const u8) Line {
         std.debug.assert(line[0] == 'p');
         const payload = skipToPayload(line);
@@ -252,6 +290,10 @@ const Line = union(enum) {
             .{ .pagelen = int } else |_| .unrecognized;
     }
 
+    /// Parses a default directive, which is defined as a pattern.
+    /// It will glob against the full internal representation of the filepath,
+    /// so it is highly recommended to start it with a "*\".
+    /// A good example is `*\mydistro-7.1.1*` or `*\Shell.efi`.
     fn createDefault(line: []const u8) Line {
         std.debug.assert(line[0] == 'd');
         const payload = skipToPayload(line);
@@ -260,11 +302,27 @@ const Line = union(enum) {
     }
 };
 
+/// A boot group representing all the options under a specific BootLine.
+/// Groups are created this way because all options in a BootLine share
+/// their cmdline and formatting options.
 pub const Group = struct {
+    /// Pointer to the config struct containing this.
+    /// It's not possible to use @fieldParentPtr since Group resides in a slice.
+    /// It's needed to have access to global Config options like the timeout.
     parent: *const Config,
-    line:   BootLine,
+    /// The bootline that defined this Group.
+    /// It's needed to have access to the cmdline, format strings, etc.
+    /// It's kept in-line since it just contains a few pointers.
+    line: BootLine,
+    /// The concrete boot options inside the group.
+    /// These are generated by actually searching through the filesystem,
+    /// unless the BootLine pattern doesn't contain a glob character, in which
+    /// case we trust the user and do not verify the presence of the target.
     items: []Option,
 
+    /// Creates the Group by filling it with options, whether by copying the
+    /// single non-globbing pattern as-is, or by searching the filesystem for
+    /// matches recursively.
     pub fn init(
         out: *Group,
         gpa: Allocator,
@@ -302,10 +360,16 @@ pub const Group = struct {
         out.line.sorter.sortField(Option, out.items, "path");
     }
 
+    /// Releases the backing slice for the storage.
     pub fn destroy(self: *Group, gpa: Allocator) void {
         gpa.free(self.items);
     }
 
+    /// See std.Io.Writer.print for details.
+    /// The group format string supports the following escapes:
+    /// * %%: prints a literal "%"
+    /// * %c: prints the configured cmdline for this option group
+    /// * %n: prints the number of options inside the group
     pub fn format(self: Group, w: *std.Io.Writer) error{WriteFailed}!void {
         var escape = false;
         var view = uni.Utf8View.init(self.line.group)
@@ -315,6 +379,7 @@ pub const Group = struct {
             if (escape) {
                 switch (c) {
                     '%'  => try w.printUnicodeCodepoint('%'),
+                    'c'  => try w.print("{s}", .{self.line.cmdline}),
                     'n'  => try w.print("{d}", .{self.items.len}),
                     else => try w.print("%{u}", .{c}),
                 }
@@ -329,10 +394,18 @@ pub const Group = struct {
     }
 };
 
+/// Represents a concrete boot option.
 pub const Option = struct {
+    /// The parent group this option belongs to.
     parent: *const Group,
+    /// The path this boot option is at. This is an internal representation that
+    /// can be used directly to create a file device path for LoadImage.
     path: []const u8,
 
+    /// Chainload into this boot option. An allocator is required to create the
+    /// deviceFilePath. It's safe to pass a gpa here, an arena is created
+    /// internally. If cmdline is given, it will override the configured one.
+    /// This is primarily useful for changing the configured cmdline at runtime.
     pub fn chainload(self: Option, gpa: Allocator, cmdline: ?[]const u16) Error!ImageExitData {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
@@ -380,6 +453,24 @@ pub const Option = struct {
         return globals.boot_services.startImage(img);
     }
 
+    /// See std.Io.Writer.print.
+    /// The option format string supports the following escapes:
+    /// * %%: prints a literal "%"
+    /// * %p: prints the path to the option file
+    /// * %f: prints the filename component of the path
+    ///   defined as everything after the last '\',
+    ///   or the whole path if there isn't one
+    /// * %b: prints the basename of the filename,
+    ///   defined as everything up to the last '.',
+    ///   or the whole filename if there isn't one
+    /// * %e: prints the extension of the filename,
+    ///   defined as everything after the last '.',
+    ///   or the empty string if there isn't one
+    /// * %d: prints the directory component of the path,
+    ///   defined as everything up to the last '\',
+    ///   or the empty string if there isn't one
+    /// * %c: prints the configured/default cmdline for this option
+    /// * %g: prints the formatted representation of this option's group
     pub fn format(self: Option, w: *std.Io.Writer) error{WriteFailed}!void {
         var escape = false;
         var view = uni.Utf8View.init(self.parent.line.fmt)
