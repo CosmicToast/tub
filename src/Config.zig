@@ -162,7 +162,8 @@ const BootLine = struct {
         // we signal that we may (and do) do this by having line be []u8
         // the alternative would be something like
         // line[sort.len+1..+pattern.len] but why do that when we have the slice?
-        text.path.convert(@constCast(pattern));
+        if (mem.containsAtLeastScalar(u8, pattern, '/', 1))
+            text.path.convert(@constCast(pattern));
         return .{
             .buf = line,
 
@@ -178,28 +179,11 @@ const BootLine = struct {
         try w.writeAll(self.buf);
     }
 
-    const default = [_]BootLine{.{
-        .buf     = ":/*.efi:Root (%n):%b:",
-        .sorter  = text.Sorter.init(""),
-        .pattern = "\\*.efi",
-        .group   = "Root (%n)",
-        .fmt     = "%b",
-        .cmdline = "",
-    }, .{
-        .buf     = ":/tools/*.efi:Tools (%n):%b:",
-        .sorter  = text.Sorter.init(""),
-        .pattern = "\\tools\\*.efi",
-        .group   = "Tools (%n)",
-        .fmt     = "%b",
-        .cmdline = "",
-    }, .{
-        .buf     = ":/EFI/BOOT/BOOT*:Default:%p:",
-        .sorter  = text.Sorter.init(""),
-        .pattern = "\\EFI\\BOOT\\BOOT*",
-        .group   = "Default",
-        .fmt     = "%p",
-        .cmdline = "",
-    }};
+    const default = [_]BootLine{
+        BootLine.create(@constCast(":\\*.efi:Root (%n):%b:")).?,
+        BootLine.create(@constCast(":\\tools\\*.efi:Tools (%n):%b:")).?,
+        BootLine.create(@constCast(":\\EFI\\BOOT\\BOOT*:Default:%p:")).?,
+    };
 };
 
 const Line = union(enum) {
