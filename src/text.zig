@@ -3,6 +3,11 @@ const unicode = std.unicode;
 
 const Error = std.os.uefi.Error;
 
+inline fn toLower(c: u21) u8 {
+    std.debug.assert(c < 128);
+    return std.ascii.toLower(@truncate(c));
+}
+
 pub fn glob(pattern: anytype, text: anytype) bool {
     // TODO: maybe error?
     var pat = Iterator.create(pattern) catch return false;
@@ -14,8 +19,10 @@ fn globWorker(pat: *Iterator, txt: *Iterator) bool {
     while (pat.nextCodepoint()) |c| {
         if (c != '*') {
             if (txt.nextCodepoint()) |v| {
-                if (v != c) return false;
-                continue;
+                if (v == c) continue
+                else if (v > 128 or c > 128) return false
+                else if (toLower(v) == toLower(c)) continue
+                else return false;
             } else return false;
         }
         // c == '*'
