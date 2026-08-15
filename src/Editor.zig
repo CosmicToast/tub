@@ -1,3 +1,4 @@
+//! Gap-buffer based editor for the cmdline.
 const std = @import("std");
 
 const Console = @import("Console.zig");
@@ -5,7 +6,9 @@ const text = @import("text.zig");
 
 const Editor = @This();
 
+/// Backing gap buffer.
 buf: Buffer,
+/// Pointer to the console to communicate with.
 con: *Console,
 
 inline fn ctrlCode(c: u21) u21 {
