@@ -13,12 +13,16 @@ const text = @import("text.zig");
 // Self to avoid conflicting with uefi.protocol.File
 const Self = @This();
 
+/// Backing opaque file pointer. Normally open, it needs to be closed.
 file: *File,
-// what's a bit of a shame is that since I COULD make this be an *Info
-// but it makes a few other things a pain
+/// The buffer that holds the FileInfo. Unfortunately this has to be a
+/// buffer for a few annoying reasons, mostly to do with flexible
+/// array members.
 ibuf: []align(8) u8,
 
-// WARN: destroy will close your file; i.e. @This() takes ownership
+/// Create a File wrapper from a uefi.protocol.File, taking ownership
+/// of the handle. This means that when you call destroy(), the
+/// backing file will be closed.
 pub fn create(file: *File, alloc: Allocator) Error!Self {
     const isz = try file.getInfoSize(.file);
     const ibuf = alloc.alignedAlloc(u8, .@"8", isz) catch return Error.OutOfResources;
@@ -26,20 +30,33 @@ pub fn create(file: *File, alloc: Allocator) Error!Self {
     return .{ .file = file, .ibuf = ibuf };
 }
 
+/// Create a File wrapper from the booted image. This depends on the
+/// globals being initialized, since the SimpleFileProtocol obtained
+/// from the LoadedImage is set up there once at startup.
 pub fn fromImage(alloc: Allocator) Error!Self {
     return create(globals.sfs.openVolume() catch return error.MediaChanged, alloc) catch error.OutOfResources;
 }
 
+/// Destroy the file, freeing the Info buffer and closing the
+/// file. This eats errors to make them silent, since there's not much
+/// to be done about it anyway: you're no longer interested in the
+/// file.
 pub fn destroy(self: *Self, alloc: Allocator) void {
     alloc.free(self.ibuf);
     // if we fail to close it there's not much we can do about it anyway
     self.file.close() catch {};
 }
 
+/// Open `path` relative to this file, where `path` is formatted as
+/// UCS-2. This takes fewer steps than `open`, meaning that if you can
+/// know your path at comptime, it is much better to call `openUcs2`
+/// against a `text.utf8ToUcs2Literal` than it is to call `open` on a
+/// UTF-8 literal.
 pub fn openUcs2(self: Self, alloc: Allocator, path: [*:0]const u16) Error!Self {
     return create(try self.file.open(path, .read, .{}), alloc);
 }
 
+/// Open `path` relative to this file, where `path` is formatted as UTF-8.
 pub fn open(self: Self, alloc: Allocator, path: []const u8) Error!Self {
     const psz = try text.calcUcs2Len(path);
     const pbuf = alloc.allocSentinel(u16, psz, 0) catch return Error.OutOfResources;
@@ -51,6 +68,9 @@ pub fn open(self: Self, alloc: Allocator, path: []const u8) Error!Self {
     return self.openUcs2(alloc, pbuf);
 }
 
+/// Read the entirety of this file into a contiguous buffer using
+/// `alloc`, returning it. Note that you should never call this on a
+/// directory.
 pub fn slurp(self: Self, alloc: Allocator) ![]u8 {
     std.debug.assert(!self.info().attribute.directory);
     const esz = self.info().file_size;
@@ -61,14 +81,18 @@ pub fn slurp(self: Self, alloc: Allocator) ![]u8 {
     return buf; // free this yourself
 }
 
+/// Returns a pointer to the File Info from the pre-populated buffer.
 pub fn info(self: Self) *const Info {
     return std.mem.bytesAsValue(Info, self.ibuf);
 }
 
+/// Returns the name of the current file as UCS-2.
 pub fn name(self: Self) []const u16 {
     return mem.span(self.info().getFileName());
 }
 
+/// Returns the name of the current file as UTF-8. The caller owns the
+/// resulting memory.
 pub fn nameUtf8(self: Self, alloc: Allocator) ![]const u8 {
     const ucs2 = self.name();
     const bsz = text.calcUtf8Len(ucs2);
@@ -78,9 +102,16 @@ pub fn nameUtf8(self: Self, alloc: Allocator) ![]const u8 {
     return buf; // free this yourself
 }
 
+/// An iterator over directory entries.
 const Iterator = struct {
+    /// The backing uefi File.
     file: *File,
+    /// The pattern to match which, if set, will skip entries that do
+    /// not match.
     pat: ?[]const u8,
+    /// The fileinfo buffer, see Self.buf for further details. This is
+    /// here so that only one allocation is needed at creation-time,
+    /// rather than one on each next() step.
     buf: []align(8) u8,
 
     fn destroy(self: *Iterator, alloc: Allocator) void {
@@ -127,14 +158,23 @@ const Iterator = struct {
     }
 };
 
+/// Instantiate an iterator over the directory `self`.
 pub fn iterate(self: Self, alloc: Allocator) !Iterator {
     return try Iterator.init(self, alloc, null);
 }
 
+/// Instantiate an iterator over the directory `self` where all
+/// returned filenames must match `pattern`.
 pub fn glob(self: Self, pattern: []const u8, alloc: Allocator) !Iterator {
     return try Iterator.init(self, alloc, pattern);
 }
 
+/// Recursively get all filenames under the directory `self` that
+/// match `pattern`. In this context, `pattern` is taken as a
+/// structured globbing pattern, meaning a wildcard only applies to a
+/// single directory level.
+/// For example, this means that if files ./a/b/c and ./a/c exist,
+/// searching . for the pattern "a/*c" will not match ./a/b/c.
 pub fn find(self: Self, pattern: []const u8, gpa: Allocator) ![][]u8 {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -144,6 +184,7 @@ pub fn find(self: Self, pattern: []const u8, gpa: Allocator) ![][]u8 {
     return findParts(self, &it, gpa, alloc);
 }
 
+/// Internal helper for `find`.
 fn findParts(self: Self, parts: *std.mem.SplitIterator(u8, .scalar), gpa: Allocator, arena: Allocator) ![][]u8 {
     // collect all matching filenames of this part
     var out = std.ArrayList([]u8).empty; // TODO: estimate? :D
@@ -178,3 +219,6 @@ fn findParts(self: Self, parts: *std.mem.SplitIterator(u8, .scalar), gpa: Alloca
     }
     return out.toOwnedSlice(gpa);
 }
+
+// TODO: implement something like find but that does not do structured
+// submatches, for handling a (leading?) **.
