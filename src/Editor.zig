@@ -111,8 +111,8 @@ const Buffer = struct {
     /// Resizes the data buffer if it is past the grow pressure threshold (0.75)
     /// such that the new pressure is 0.5.
     pub fn grow(self: *Buffer, gpa: std.mem.Allocator) !void {
-        const target = (self.left + self.right) * 2;
-        if (self.data.len >= target) return;
+        const target = if (self.data.len == 0) 16 else (self.left + self.right) * 2;
+        if (target / 3 * 2 < self.data.len) return;
 
         const oldlen = self.data.len;
         if (!gpa.resize(self.data, target)) {
