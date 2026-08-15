@@ -1,10 +1,9 @@
 const std = @import("std");
 
+const Console = @import("Console.zig");
 const text = @import("text.zig");
 
-const Console = @import("Console.zig");
-
-const Self = @This();
+const Editor = @This();
 
 buf: Buffer,
 con: *Console,
@@ -20,7 +19,7 @@ pub fn edit(initial: []const u8, gpa: std.mem.Allocator) !?[]const u16 {
     const real = try text.utf8ToUcs2(buf, initial);
     std.debug.assert(len == real);
     var con = Console.init();
-    var self: Self = .{
+    var self: Editor = .{
         .buf = .{ .data = buf, .left = len, .right = 0 },
         .con = &con,
     };
@@ -32,38 +31,38 @@ pub fn edit(initial: []const u8, gpa: std.mem.Allocator) !?[]const u16 {
         const state = try self.input(in, gpa);
         if (state == null) continue;
         return switch (state.?) {
-            .quit   => null,
+            .quit => null,
             .submit => |v| v,
         };
     }
 }
 
-pub fn redraw(self: *Self) !void {
+pub fn redraw(self: *Editor) !void {
     self.con.clear();
     self.con.setCursor(.disabled) catch {};
     try self.buf.format(&self.con.writer);
 }
 
-pub fn input(self: *Self, key: Console.Input, gpa: std.mem.Allocator) !?union(enum) {
+pub fn input(self: *Editor, key: Console.Input, gpa: std.mem.Allocator) !?union(enum) {
     quit,
     submit: []const u16,
 } {
     switch (key) {
-        .left_arrow  => self.buf.move(.left),
+        .left_arrow => self.buf.move(.left),
         .right_arrow => self.buf.move(.right),
-        .home        => self.buf.move(.start),
-        .end         => self.buf.move(.end),
-        .delete      => self.buf.delete(),
+        .home => self.buf.move(.start),
+        .end => self.buf.move(.end),
+        .delete => self.buf.delete(),
 
         .escape => return .quit,
         .text => |c| switch (c) {
-            ctrlCode('a') => self.buf.move(.start),    // ^a: start of line
-            ctrlCode('b') => self.buf.move(.left),     // ^b: move backwards
-            ctrlCode('d') => self.buf.delete(),        // ^d: delete
-            ctrlCode('e') => self.buf.move(.end),      // ^e: end of line
-            ctrlCode('f') => self.buf.move(.right),    // ^f: move forwards
-            ctrlCode('h') => self.buf.backspace(),     // ^h: backspace
-            ctrlCode('k') => self.buf.killLine(),      // ^k: kill line
+            ctrlCode('a') => self.buf.move(.start), // ^a: start of line
+            ctrlCode('b') => self.buf.move(.left), // ^b: move backwards
+            ctrlCode('d') => self.buf.delete(), // ^d: delete
+            ctrlCode('e') => self.buf.move(.end), // ^e: end of line
+            ctrlCode('f') => self.buf.move(.right), // ^f: move forwards
+            ctrlCode('h') => self.buf.backspace(), // ^h: backspace
+            ctrlCode('k') => self.buf.killLine(), // ^k: kill line
             ctrlCode('u') => self.buf.killWholeLine(), // ^u: kill whole line
 
             // NOTE: \r and ^m are the same!
@@ -100,7 +99,7 @@ const Buffer = struct {
 
     /// Convenience function to get the right buffer.
     inline fn rightb(self: Buffer) []u16 {
-        return self.data[self.data.len - self.right..];
+        return self.data[self.data.len - self.right ..];
     }
 
     /// Convenience function to calculate the pressure.
@@ -121,48 +120,50 @@ const Buffer = struct {
             const new = try gpa.alloc(u16, target);
 
             @memcpy(new[0..self.left], self.leftb());
-            @memcpy(new[new.len - self.right..], self.rightb());
+            @memcpy(new[new.len - self.right ..], self.rightb());
 
             gpa.free(self.data);
             self.data = new;
         } else {
             const old = self.data[0..oldlen];
-            @memmove(self.rightb(), old[old.len - self.right..]);
+            @memmove(self.rightb(), old[old.len - self.right ..]);
         }
     }
 
     /// Move the cursor to the logical position in the buffer.
-    pub fn move(
-        self: *Buffer,
-        how: union(enum) {
-            left, right, start, end,
-            to: usize,
-        }
-    ) void {
-        const pos = switch(how) {
-            .left  => self.left - 1,
+    pub fn move(self: *Buffer, how: union(enum) {
+        left,
+        right,
+        start,
+        end,
+        to: usize,
+    }) void {
+        const pos = switch (how) {
+            .left => self.left - 1,
             .right => self.left + 1,
             .start => 0,
-            .end   => self.left + self.right,
-            .to    => |v| v,
+            .end => self.left + self.right,
+            .to => |v| v,
         };
         if (pos > self.left + self.right)
-            return @call(.always_tail, move, .{self, .end});
+            return @call(.always_tail, move, .{ self, .end });
         if (pos == self.left) return;
         const rstart = self.data.len - self.right;
 
         if (pos > self.left) {
             const count = pos - self.left;
-            const dst   = self.data[self.left..][0..count];
-            const src   = self.data[rstart..][0..count];
+            const dst = self.data[self.left..][0..count];
+            const src = self.data[rstart..][0..count];
             @memmove(dst, src);
-            self.left += count; self.right -= count;
+            self.left += count;
+            self.right -= count;
         } else {
             const count = self.left - pos;
-            const dst   = self.data[rstart-count..][0..count];
-            const src   = self.data[pos..][0..count];
+            const dst = self.data[rstart - count ..][0..count];
+            const src = self.data[pos..][0..count];
             @memmove(dst, src);
-            self.left -= count; self.right += count;
+            self.left -= count;
+            self.right += count;
         }
     }
 
@@ -175,7 +176,7 @@ const Buffer = struct {
 
     /// See std.Io.Writer.print.
     pub fn format(self: *Buffer, w: *std.Io.Writer) !void {
-        for (self.leftb())  |c| try w.printUnicodeCodepoint(c);
+        for (self.leftb()) |c| try w.printUnicodeCodepoint(c);
         // 0x2588 is the BLOCKELEMENT LIGHT SHADE
         // it's the best "cursor-like" I can do in theory, I think
         //
@@ -228,6 +229,7 @@ const Buffer = struct {
 
     /// Remove everything.
     pub inline fn killWholeLine(self: *Buffer) void {
-        self.left = 0; self.right = 0;
+        self.left = 0;
+        self.right = 0;
     }
 };
