@@ -139,8 +139,8 @@ const Buffer = struct {
         to: usize,
     }) void {
         const pos = switch (how) {
-            .left => self.left - 1,
-            .right => self.left + 1,
+            .left => self.left -| 1,
+            .right => self.left +| 1,
             .start => 0,
             .end => self.left + self.right,
             .to => |v| v,
