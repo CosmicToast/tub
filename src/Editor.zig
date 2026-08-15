@@ -13,6 +13,10 @@ inline fn ctrlCode(c: u21) u21 {
     return c - 'a' + 1;
 }
 
+/// Creates an Editor and runs it as a state machine until an error occurs, the
+/// user submits the result, or the user cancels the editing process.
+/// Null means the user has cancelled, so an empty slice means the user
+/// explicitly requested such.
 pub fn edit(initial: []const u8, gpa: std.mem.Allocator) !?[]const u16 {
     const len = try text.calcUcs2Len(initial);
     const buf = try gpa.alloc(u16, len * 2);
@@ -37,13 +41,13 @@ pub fn edit(initial: []const u8, gpa: std.mem.Allocator) !?[]const u16 {
     }
 }
 
-pub fn redraw(self: *Editor) !void {
+fn redraw(self: *Editor) !void {
     self.con.clear();
     self.con.setCursor(.disabled) catch {};
     try self.buf.format(&self.con.writer);
 }
 
-pub fn input(self: *Editor, key: Console.Input, gpa: std.mem.Allocator) !?union(enum) {
+fn input(self: *Editor, key: Console.Input, gpa: std.mem.Allocator) !?union(enum) {
     quit,
     submit: []const u16,
 } {
@@ -80,7 +84,10 @@ pub fn input(self: *Editor, key: Console.Input, gpa: std.mem.Allocator) !?union(
     return null;
 }
 
-const Buffer = struct {
+/// A Gap Buffer implementation with some common editing commands predefined.
+/// The caller is responsible for making sure grow is called with data's
+/// allocator, as well as data's memory.
+pub const Buffer = struct {
     /// Backing storage, typically around double the size of the current data.
     data: []u16,
 
