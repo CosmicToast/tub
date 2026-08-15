@@ -1,18 +1,16 @@
 //! Wrapper around UEFI Files.
-
-const std  = @import("std");
-const mem  = std.mem;
+const std = @import("std");
+const mem = std.mem;
 const uefi = std.os.uefi;
+const Error = uefi.Error;
+const Allocator = std.mem.Allocator;
+const File = uefi.protocol.File;
+const Info = File.Info.File;
 
 const globals = @import("globals.zig");
 const text = @import("text.zig");
 
-const Error = uefi.Error;
-
-const Allocator = std.mem.Allocator;
-const File      = uefi.protocol.File;
-const Info      = File.Info.File;
-
+// Self to avoid conflicting with uefi.protocol.File
 const Self = @This();
 
 file: *File,
@@ -22,18 +20,14 @@ ibuf: []align(8) u8,
 
 // WARN: destroy will close your file; i.e. @This() takes ownership
 pub fn create(file: *File, alloc: Allocator) Error!Self {
-    const isz  = try file.getInfoSize(.file);
-    const ibuf = alloc.alignedAlloc(u8, .@"8", isz)
-        catch return Error.OutOfResources;
+    const isz = try file.getInfoSize(.file);
+    const ibuf = alloc.alignedAlloc(u8, .@"8", isz) catch return Error.OutOfResources;
     _ = try file.getInfo(.file, ibuf);
-    return .{ .file = file, .ibuf = ibuf};
+    return .{ .file = file, .ibuf = ibuf };
 }
 
 pub fn fromImage(alloc: Allocator) Error!Self {
-    return create(
-        globals.sfs.openVolume() catch return error.MediaChanged,
-        alloc
-    ) catch error.OutOfResources;
+    return create(globals.sfs.openVolume() catch return error.MediaChanged, alloc) catch error.OutOfResources;
 }
 
 pub fn destroy(self: *Self, alloc: Allocator) void {
@@ -47,9 +41,8 @@ pub fn openUcs2(self: Self, alloc: Allocator, path: [*:0]const u16) Error!Self {
 }
 
 pub fn open(self: Self, alloc: Allocator, path: []const u8) Error!Self {
-    const psz  = try text.calcUcs2Len(path);
-    const pbuf = alloc.allocSentinel(u16, psz, 0)
-        catch return Error.OutOfResources;
+    const psz = try text.calcUcs2Len(path);
+    const pbuf = alloc.allocSentinel(u16, psz, 0) catch return Error.OutOfResources;
     defer alloc.free(pbuf);
 
     const rsz = try text.utf8ToUcs2(pbuf, path);
@@ -78,9 +71,9 @@ pub fn name(self: Self) []const u16 {
 
 pub fn nameUtf8(self: Self, alloc: Allocator) ![]const u8 {
     const ucs2 = self.name();
-    const bsz  = text.calcUtf8Len(ucs2);
-    const buf  = alloc.alloc(u8, bsz);
-    const rsz  = text.ucs2ToUtf8(buf, ucs2);
+    const bsz = text.calcUtf8Len(ucs2);
+    const buf = alloc.alloc(u8, bsz);
+    const rsz = text.ucs2ToUtf8(buf, ucs2);
     std.debug.assert(rsz == bsz);
     return buf; // free this yourself
 }
@@ -147,19 +140,11 @@ pub fn find(self: Self, pattern: []const u8, gpa: Allocator) ![][]u8 {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var it = std.mem.splitScalar(
-        u8,
-        if (pattern[0] == '\\') pattern[1..] else pattern,
-        '\\'
-    );
+    var it = std.mem.splitScalar(u8, if (pattern[0] == '\\') pattern[1..] else pattern, '\\');
     return findParts(self, &it, gpa, alloc);
 }
 
-fn findParts(
-    self: Self,
-    parts: *std.mem.SplitIterator(u8, .scalar),
-    gpa: Allocator,
-    arena: Allocator) ![][]u8 {
+fn findParts(self: Self, parts: *std.mem.SplitIterator(u8, .scalar), gpa: Allocator, arena: Allocator) ![][]u8 {
     // collect all matching filenames of this part
     var out = std.ArrayList([]u8).empty; // TODO: estimate? :D
     var it = try self.glob(parts.next() orelse return &.{}, arena);
@@ -187,7 +172,7 @@ fn findParts(
         var partsCopy = parts.*;
         const submatches = try findParts(subdir, &partsCopy, arena, arena);
         for (submatches) |subpath| {
-            const fullpath = try std.mem.join(gpa, "\\", &.{file, subpath});
+            const fullpath = try std.mem.join(gpa, "\\", &.{ file, subpath });
             try out.append(gpa, fullpath);
         }
     }
