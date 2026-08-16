@@ -1,17 +1,17 @@
 //! Configuration reader for the `tub(5)` format.
-const std  = @import("std");
-const mem  = std.mem;
+const std = @import("std");
+const mem = std.mem;
 const uefi = std.os.uefi;
-const uni  = std.unicode;
-const Allocator     = mem.Allocator;
-const DevicePath    = uefi.protocol.DevicePath;
-const Error         = uefi.Error;
+const uni = std.unicode;
+const Allocator = mem.Allocator;
+const DevicePath = uefi.protocol.DevicePath;
+const Error = uefi.Error;
 const ImageExitData = uefi.tables.BootServices.ImageExitData;
-const LoadedImage   = uefi.protocol.LoadedImage;
+const LoadedImage = uefi.protocol.LoadedImage;
 
-const File    = @import("File.zig");
+const File = @import("File.zig");
 const globals = @import("globals.zig");
-const text    = @import("text.zig");
+const text = @import("text.zig");
 
 const Config = @This();
 
@@ -30,7 +30,9 @@ pagelen: u8 = 10,
 /// Set with !d[efault] pattern.
 default: []const u8 = "",
 
-// DevicePath to use in constructing the chainload DevicePath.
+/// DevicePath to use in constructing the chainload
+/// DevicePath. Overriding this makes it possible to boot files in
+/// other partitions, but then you also have to override `load`.
 device: *const DevicePath,
 
 /// Underlying storage for the raw configuration files.
@@ -44,7 +46,9 @@ pub fn load(gpa: Allocator) Error!*Config {
     var out = gpa.create(Config) catch return Error.OutOfResources;
     errdefer out.destroy(gpa);
 
-    out.timeout = 5; out.pagelen = 10; out.default = &.{};
+    out.timeout = 5;
+    out.pagelen = 10;
+    out.default = &.{};
     out.device = globals.devicepath;
 
     var root = try File.fromImage(gpa);
@@ -55,23 +59,19 @@ pub fn load(gpa: Allocator) Error!*Config {
 
     // read all the config files recursively
     // populating buffers (out.storage) and getting lines
-    const lines = loadFile(out, root, "tub.conf", gpa, &buffers)
-        catch &BootLine.default;
+    const lines = loadFile(out, root, "tub.conf", gpa, &buffers) catch &BootLine.default;
     errdefer gpa.free(lines);
-    out.storage = buffers.toOwnedSlice(gpa)
-        catch return Error.OutOfResources;
+    out.storage = buffers.toOwnedSlice(gpa) catch return Error.OutOfResources;
     errdefer {
         for (out.storage) |buf| gpa.free(buf);
         gpa.free(out.storage);
     }
 
-    out.items = gpa.alloc(Group, lines.len)
-        catch return Error.OutOfResources;
+    out.items = gpa.alloc(Group, lines.len) catch return Error.OutOfResources;
     errdefer gpa.free(out.items);
     for (lines, 0..) |line, i| {
         // WARN: each out.item[*] leaks if a future one errors
-        out.items[i].init(gpa, out, line, root)
-            catch return Error.OutOfResources;
+        out.items[i].init(gpa, out, line, root) catch return Error.OutOfResources;
     }
 
     return out;
@@ -109,12 +109,12 @@ fn loadFile(
             if (loadFile(self, root, f, gpa, bufs)) |sublines|
                 lines.appendSlice(gpa, sublines) catch return Error.OutOfResources
             else |_| {} // failing to load a file = skip it, all optional
-        }
+        },
     };
 
     const out = lines.toOwnedSlice(gpa) catch return Error.OutOfResources;
     bufs.append(gpa, buf) // important that this is the last step
-        catch return Error.OutOfResources;
+    catch return Error.OutOfResources;
     return out;
 }
 
@@ -149,23 +149,23 @@ const BootLine = struct {
     buf: []const u8,
 
     /// Options for the sorter. Field 1.
-    sorter:  text.Sorter,
+    sorter: text.Sorter,
     /// The glob of the files to include. Field 2.
     pattern: []const u8,
     /// The format string for the group's display. Field 3.
-    group:   []const u8,
+    group: []const u8,
     /// The format string for the boot entries. Field 4.
-    fmt:     []const u8,
+    fmt: []const u8,
     /// The command line to pass through when chainloading. Field 5.
     cmdline: []const u8,
 
     /// Parses a line (should not contain \n). Returns null on errors to skip.
     pub fn create(line: []u8) ?BootLine {
         var it = mem.splitScalar(u8, line, ':');
-        const sort    = text.Sorter.init(it.first());
+        const sort = text.Sorter.init(it.first());
         const pattern = it.next() orelse return null;
-        const group   = it.next() orelse return null;
-        const fmt     = it.next() orelse return null;
+        const group = it.next() orelse return null;
+        const fmt = it.next() orelse return null;
         const cmdline = it.rest();
 
         // we signal that we may (and do) do this by having line be []u8
@@ -176,10 +176,10 @@ const BootLine = struct {
         return .{
             .buf = line,
 
-            .sorter  = sort,
+            .sorter = sort,
             .pattern = pattern,
-            .group   = group,
-            .fmt     = fmt,
+            .group = group,
+            .fmt = fmt,
             .cmdline = cmdline,
         };
     }
@@ -189,6 +189,8 @@ const BootLine = struct {
         try w.writeAll(self.buf);
     }
 
+    /// The default configuration lines. For directives, the defaults
+    /// are the default.
     const default = [_]BootLine{
         BootLine.create(@constCast(":\\*.efi:Root (%n):%b:")).?,
         BootLine.create(@constCast(":\\tools\\*.efi:Tools (%n):%b:")).?,
@@ -227,20 +229,22 @@ const Line = union(enum) {
     /// the first character (! is a directive and # is a comment), and the type
     /// of directive from the 2nd character.
     pub fn create(line: []u8) Line {
-        if (line.len == 0)  return .comment;
+        if (line.len == 0) return .comment;
         if (line[0] == '#') return .comment;
 
         if (line[0] != '!')
             return if (BootLine.create(line)) |bl|
-                .{ .boot = bl } else .unrecognized;
+                .{ .boot = bl }
+            else
+                .unrecognized;
 
         // !S[omething] payload
         if (line.len < 2) return .unrecognized;
         return switch (line[1]) {
-            'd'  => createDefault(line[1..]),
-            'i'  => createInclude(line[1..]),
-            'p'  => createPagelen(line[1..]),
-            't'  => createTimeout(line[1..]),
+            'd' => createDefault(line[1..]),
+            'i' => createInclude(line[1..]),
+            'p' => createPagelen(line[1..]),
+            't' => createTimeout(line[1..]),
             else => .unrecognized,
         };
     }
@@ -268,7 +272,9 @@ const Line = union(enum) {
         std.debug.assert(line[0] == 't');
         const payload = skipToPayload(line);
         return if (std.fmt.parseUnsigned(u8, payload, 10)) |int|
-            .{ .timeout = int } else |_| .unrecognized;
+            .{ .timeout = int }
+        else |_|
+            .unrecognized;
     }
 
     /// Parses an include directive, which is defined as a path to include.
@@ -287,7 +293,9 @@ const Line = union(enum) {
         std.debug.assert(line[0] == 'p');
         const payload = skipToPayload(line);
         return if (std.fmt.parseUnsigned(u8, payload, 10)) |int|
-            .{ .pagelen = int } else |_| .unrecognized;
+            .{ .pagelen = int }
+        else |_|
+            .unrecognized;
     }
 
     /// Parses a default directive, which is defined as a pattern.
@@ -323,20 +331,14 @@ pub const Group = struct {
     /// Creates the Group by filling it with options, whether by copying the
     /// single non-globbing pattern as-is, or by searching the filesystem for
     /// matches recursively.
-    pub fn init(
-        out: *Group,
-        gpa: Allocator,
-        cfg: *Config,
-        line: BootLine,
-        root: File
-    ) !void {
+    pub fn init(out: *Group, gpa: Allocator, cfg: *Config, line: BootLine, root: File) !void {
         out.parent = cfg;
-        out.line   = line;
+        out.line = line;
 
         // if there's no globbing pattern, we trust the hardcoded string
         if (!mem.containsAtLeastScalar(u8, line.pattern, '*', 1)) {
             out.items = try gpa.alloc(Option, 1);
-            out.items[0] = .{.parent = out, .path = line.pattern};
+            out.items[0] = .{ .parent = out, .path = line.pattern };
             return;
         }
 
@@ -351,7 +353,7 @@ pub const Group = struct {
             for (names) |name|
                 try items.append(gpa, .{
                     .parent = out,
-                    .path   = name,
+                    .path = name,
                 });
 
             break :blk try items.toOwnedSlice(gpa);
@@ -362,6 +364,9 @@ pub const Group = struct {
 
     /// Releases the backing slice for the storage.
     pub fn destroy(self: *Group, gpa: Allocator) void {
+        for (self.items) |item| {
+            gpa.free(item.path);
+        }
         gpa.free(self.items);
     }
 
@@ -372,15 +377,14 @@ pub const Group = struct {
     /// * %n: prints the number of options inside the group
     pub fn format(self: Group, w: *std.Io.Writer) error{WriteFailed}!void {
         var escape = false;
-        var view = uni.Utf8View.init(self.line.group)
-            catch return error.WriteFailed;
-        var it   = view.iterator();
+        var view = uni.Utf8View.init(self.line.group) catch return error.WriteFailed;
+        var it = view.iterator();
         while (it.nextCodepoint()) |c| {
             if (escape) {
                 switch (c) {
-                    '%'  => try w.printUnicodeCodepoint('%'),
-                    'c'  => try w.print("{s}", .{self.line.cmdline}),
-                    'n'  => try w.print("{d}", .{self.items.len}),
+                    '%' => try w.printUnicodeCodepoint('%'),
+                    'c' => try w.print("{s}", .{self.line.cmdline}),
+                    'n' => try w.print("{d}", .{self.items.len}),
                     else => try w.print("%{u}", .{c}),
                 }
                 escape = false;
@@ -398,8 +402,10 @@ pub const Group = struct {
 pub const Option = struct {
     /// The parent group this option belongs to.
     parent: *const Group,
-    /// The path this boot option is at. This is an internal representation that
-    /// can be used directly to create a file device path for LoadImage.
+    /// The path this boot option is at. This is an internal
+    /// representation that can be used directly to create a file
+    /// device path for LoadImage. Note that the creator of the Option
+    /// owns this memory.
     path: []const u8,
 
     /// Chainload into this boot option. An allocator is required to create the
@@ -412,37 +418,31 @@ pub const Option = struct {
         var alloc = arena.allocator();
 
         const path = blk: {
-            const len  = try text.calcUcs2Len(self.path);
-            const out  = alloc.alloc(u16, len) catch return Error.OutOfResources;
+            const len = try text.calcUcs2Len(self.path);
+            const out = alloc.alloc(u16, len) catch return Error.OutOfResources;
             const real = try text.utf8ToUcs2(out, self.path);
             std.debug.assert(real == len);
             break :blk out;
         };
 
-        const dp  = self.parent.parent.device.createFileDevicePath(alloc, path)
-            catch return error.OutOfResources;
-        const img = try globals.boot_services.loadImage(
-            false, uefi.handle, .{ .device_path = dp }
-        );
+        const dp = self.parent.parent.device.createFileDevicePath(alloc, path) catch return error.OutOfResources;
+        const img = try globals.boot_services.loadImage(false, uefi.handle, .{ .device_path = dp });
 
         const cmd: []const u16 = if (cmdline) |cmd| cmd else blk: {
             const cmd = self.parent.line.cmdline;
             if (cmd.len == 0) break :blk ([0]u16{})[0..0];
 
             const len = try text.calcUcs2Len(cmd);
-            const out = alloc.alloc(u16, len)
-                catch return error.OutOfResources;
+            const out = alloc.alloc(u16, len) catch return error.OutOfResources;
             const real = try text.utf8ToUcs2(out, cmd);
             std.debug.assert(real == len);
             break :blk out;
         };
 
         if (cmd.len > 0) {
-            const final = alloc.dupeSentinel(u16, cmd, 0)
-                catch return error.OutOfResources;
+            const final = alloc.dupeSentinel(u16, cmd, 0) catch return error.OutOfResources;
 
-            const limg = try globals.boot_services.handleProtocol(LoadedImage, img)
-                orelse return error.LoadError;
+            const limg = try globals.boot_services.handleProtocol(LoadedImage, img) orelse return error.LoadError;
             const len = @sizeOf(u16) * (final.len + 1);
             std.debug.assert(len <= std.math.maxInt(u32));
 
@@ -473,9 +473,8 @@ pub const Option = struct {
     /// * %g: prints the formatted representation of this option's group
     pub fn format(self: Option, w: *std.Io.Writer) error{WriteFailed}!void {
         var escape = false;
-        var view = uni.Utf8View.init(self.parent.line.fmt)
-            catch return error.WriteFailed;
-        var it   = view.iterator();
+        var view = uni.Utf8View.init(self.parent.line.fmt) catch return error.WriteFailed;
+        var it = view.iterator();
         while (it.nextCodepoint()) |c| {
             if (escape) {
                 switch (c) {
