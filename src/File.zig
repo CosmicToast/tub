@@ -170,7 +170,11 @@ pub fn glob(self: Self, pattern: []const u8, alloc: Allocator) !Iterator {
 }
 
 /// Recursively get all filenames under the directory `self` that
-/// match `pattern`. In this context, `pattern` is taken as a
+/// match `pattern`.
+/// `pattern` may either begin with "**", in which case all of the
+/// filenames on the volume will be gathered and their internal path
+/// representation matched against the pattern.
+/// If `pattern` does not begin with a "*", it is taken as a
 /// structured globbing pattern, meaning a wildcard only applies to a
 /// single directory level.
 /// For example, this means that if files ./a/b/c and ./a/c exist,
@@ -180,6 +184,19 @@ pub fn find(self: Self, pattern: []const u8, gpa: Allocator) ![][]u8 {
     defer arena.deinit();
     const alloc = arena.allocator();
 
+    // recursive wildcard searching
+    if (pattern.len > 1 and pattern[0] == pattern[1] and pattern[0] == '*') {
+        const all = try self.findAll(alloc, alloc);
+        var out = std.ArrayList([]u8).empty;
+        for (all) |path| {
+            if (text.glob(pattern[1..], path)) {
+                try out.append(gpa, try gpa.dupe(u8, path));
+            }
+        }
+        return try out.toOwnedSlice(gpa);
+    }
+
+    // structural searching
     var it = std.mem.splitScalar(u8, if (pattern[0] == '\\') pattern[1..] else pattern, '\\');
     return findParts(self, &it, gpa, alloc);
 }
@@ -220,5 +237,38 @@ fn findParts(self: Self, parts: *std.mem.SplitIterator(u8, .scalar), gpa: Alloca
     return out.toOwnedSlice(gpa);
 }
 
-// TODO: implement something like find but that does not do structured
-// submatches, for handling a (leading?) **.
+/// Internal helper for `find`.
+fn findAll(self: Self, gpa: Allocator, arena: Allocator) ![][]u8 {
+    var out = std.ArrayList([]u8).empty;
+    var it = try self.iterate(arena);
+    while (it.next()) |file| {
+        const ucs2 = file.getFileName();
+        const ucss = std.mem.span(ucs2);
+        const elen = try text.calcUtf8Len(ucss);
+        const utf8 = try gpa.alloc(u8, elen);
+        const rlen = try text.ucs2ToUtf8(utf8, ucss);
+        std.debug.assert(elen == rlen);
+        try out.append(gpa, utf8);
+    }
+    const here = try out.toOwnedSlice(gpa); // NOTE: calls clearAndFree
+
+    for (here) |file| {
+        if (file[0] == '.') continue;
+        var subdir = try self.open(arena, file);
+        defer subdir.destroy(arena);
+
+        // add files as-is
+        if (!subdir.info().attribute.directory) {
+            try out.append(gpa, file);
+            continue;
+        }
+
+        // add everything under directory
+        const subfiles = try subdir.findAll(arena, arena);
+        for (subfiles) |subpath| {
+            const fullpath = try std.mem.join(gpa, "\\", &.{ file, subpath });
+            try out.append(gpa, fullpath);
+        }
+    }
+    return out.toOwnedSlice(gpa);
+}
