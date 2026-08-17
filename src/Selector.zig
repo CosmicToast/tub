@@ -94,7 +94,7 @@ pub fn step(self: *Selector) SelectorError!?Selection {
 /// whether to edit or not. If in a Group selector, the Selector will
 /// advance to selecting the Option within the selected Group. If in a
 /// Option selector, the specific Option is materialized and returned.
-fn select(self: *Selector, value: ?usize) ?Config.Option {
+pub fn select(self: *Selector, value: ?usize) ?Config.Option {
     if (self.option) |*option| {
         if (value) |v| {
             if (option.onPage(v)) {
