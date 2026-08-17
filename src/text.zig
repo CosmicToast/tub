@@ -228,7 +228,7 @@ pub const Sorter = packed struct {
                 return s.lessFn(l, r);
             }
         }.lessFn;
-        return std.mem.sort(T, items, self, F);
+        return std.sort.insertion(T, items, self, F);
     }
 };
 
