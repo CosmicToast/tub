@@ -59,7 +59,10 @@ pub fn load(gpa: Allocator) Error!*Config {
 
     // read all the config files recursively
     // populating buffers (out.storage) and getting lines
-    const lines = loadFile(out, root, "tub.conf", gpa, &buffers) catch &BootLine.default;
+    const lines = loadFile(out, root, "tub.conf", gpa, &buffers) catch blk: {
+        // HERE: modify out to change things only accessible via directives, if any
+        break :blk gpa.dupe(BootLine, &BootLine.default) catch return Error.OutOfResources;
+    };
     errdefer gpa.free(lines);
     out.storage = buffers.toOwnedSlice(gpa) catch return Error.OutOfResources;
     errdefer {
