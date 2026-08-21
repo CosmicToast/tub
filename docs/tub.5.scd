@@ -42,10 +42,16 @@ If the pattern is a simple pattern (i.e. it does not contain an asterisk), it
 will not be verified, meaning that if the file does not actually exist, it will
 still be displayed.
 
-It is expected that most patterns will be globbing patterns (i.e. will contain
-asterisks). Globs may appear anywhere in the pattern, and their number is
-unlimited, but they will never match a directory. For example, */fo\*o/\*.efi*
-will match */foo/bar.efi* but will not match */foo/bar/baz.efi*.
+If a pattern contains an asterisk (*\**), it is considered to be a globbing
+pattern. Globbing patterns can be structural or recursive. A recursive pattern
+begins with two asterisks (*\*\**), which can stand for however many directories
+is needed (the entire filename is matched against the pattern). For example,
+the *\*\*.efi* pattern will select all files ending in .efi on the filesystem.
+
+A pattern that does not contain an asterisk is considered to be a structural
+pattern. In structural patterns, the full path is specified, but each component
+of the path may contain a glob. For example, */fo\*o/\*.efi* will match
+*/foo/bar.efi* and */foobaro/bar.efi* but will not match */foo/bar/baz.efi*.
 
 All matching files (i.e. not directories) will be added as boot options, whether
 or not they are truly bootable.
@@ -140,6 +146,9 @@ r:/linux/example-*.efi:Example Linux:%b:rootwait rw
 
 # this is a typical example to allow dropping in UEFI tools into ESP\\tools
 :/tools/*.efi:Tools:%b:
+
+# this is the default configuration if a config file isn't found
+pr:**.efi:Discovered EFI files (%n):%p:
 ```
 
 # SEE ALSO

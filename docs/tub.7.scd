@@ -37,8 +37,10 @@ simplefilesystem protocol is implemented for it.
 
 See _tub.conf_(5) for more details on the configuration file format.
 
-Once the default configuration is implemented, an equivalent one will be written
-out here.
+The default configuration (if a config file could not be found) is:
+```
+pr:**.efi:Discovered EFI files (%n):%p:
+```
 
 ## Boot Groups
 
