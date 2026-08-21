@@ -35,7 +35,7 @@ is on. Booting from other device types (such as the network) is theoretically
 possible under the condition that a valid device pointer exists, and the
 simplefilesystem protocol is implemented for it.
 
-See _tub.conf_(5) for more details on the configuration file format.
+See _tub_(5) for more details on the configuration file format.
 
 The default configuration (if a config file could not be found) is:
 ```
@@ -56,7 +56,7 @@ default boot option will be automatically picked.
 The default boot option is the first option that matches the default directive
 (or simply the first option in the first non-empty group if that's empty). Note
 that the glob is performed against an internal representation of the path. See
-_tub.conf_(5) for recommendations on how to compose your pattern.
+_tub_(5) for recommendations on how to compose your pattern.
 
 # SELECTION MENU
 
@@ -105,4 +105,4 @@ available key bindings:
 
 # SEE ALSO
 
-_tub.conf_(5)
+_tub_(5)

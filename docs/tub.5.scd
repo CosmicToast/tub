@@ -2,7 +2,7 @@ tub(5)
 
 # NAME
 
-tub.conf - tub configuration file
+tub - tub configuration file
 
 # DESCRIPTION
 
