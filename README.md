@@ -15,6 +15,17 @@ It is optimized specifically for the following cases:
 It is generally recommended to mount your ESP as /boot and have it be relatively large (16+GB).
 See `tub(5)` and `tub(7)` for the configuration file format and general introduction on how to use tub respectively.
 
+## Requirements
+
+tub is built as to require as little as possible from the system in order to do what it does.
+It will run on roughly anything that provides all of the following:
+- Loaded Image protocol as per the spec (i.e. with a device pointer)
+- Simple File System protocol over the abovementioned device
+  (which means it MAY in theory work in networked boot scenarios, though those are as of now untested)
+- Mostly-spec-compliant Simple Text Input/Output protocols for console I/O
+  where the "mostly" refers to some UEFI implementations not reporting cursor data correctly,
+  which tub works around by using a "soft" cursor (a guaranteed codepoint character).
+
 ## Rationale
 
 Multi-boot systems (of any kind) create a social ownership problem.
