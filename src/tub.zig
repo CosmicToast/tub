@@ -63,6 +63,9 @@ fn main() !void {
     defer cfg.destroy(uefi.pool_allocator);
 
     var ui = Selector.init(cfg, &console);
+    // If there's only one group, and it's selectable, select it.
+    if (cfg.items.len == 1 and cfg.items[0].items.len > 0)
+        _ = ui.select(null);
     while (true) {
         const opt = try ui.step();
         console.clear();

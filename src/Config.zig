@@ -195,9 +195,7 @@ const BootLine = struct {
     /// The default configuration lines. For directives, the defaults
     /// are the default.
     const default = [_]BootLine{
-        BootLine.create(@constCast(":\\*.efi:Root (%n):%b:")).?,
-        BootLine.create(@constCast(":\\tools\\*.efi:Tools (%n):%b:")).?,
-        BootLine.create(@constCast(":\\EFI\\BOOT\\BOOT*:Default:%p:")).?,
+        BootLine.create(@constCast("pr:**.efi:Discovered EFI files (%n):%p:")).?,
     };
 };
 
